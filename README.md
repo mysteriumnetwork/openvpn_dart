@@ -52,7 +52,6 @@ Refer to the API documentation and example project for more details.
 
 ## Documentation
 
-- [API Reference](https://pub.dev/documentation/openvpn_dart/latest/)
 - [Repository](https://github.com/mysteriumnetwork/openvpn_dart)
 
 ## License
