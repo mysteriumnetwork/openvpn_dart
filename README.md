@@ -11,11 +11,32 @@
 
 ## Installation
 
-Add this to your `pubspec.yaml`:
+
+### From pub.dev (latest release)
 
 ```yaml
 dependencies:
 	openvpn_dart: ^0.0.1
+```
+
+### From GitHub (main branch)
+
+```yaml
+dependencies:
+	openvpn_dart:
+		git:
+			url: https://github.com/mysteriumnetwork/openvpn_dart.git
+			ref: master
+```
+
+### From GitHub (specific release)
+
+```yaml
+dependencies:
+	openvpn_dart:
+		git:
+			url: https://github.com/mysteriumnetwork/openvpn_dart.git
+			ref: release/latest
 ```
 
 Then run:
