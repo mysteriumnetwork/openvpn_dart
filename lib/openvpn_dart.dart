@@ -21,10 +21,10 @@ class OpenVPNDart {
   ///To indicate the engine already initialize
   bool initialized = false;
 
-  VPNStatus? _lastStatus;
+  ConnectionStatus? _lastStatus;
 
   /// is a listener to see what status the connection was
-  final Function(VPNStatus status, String rawStatus)? onVPNStatusChanged;
+  final Function(ConnectionStatus status, String rawStatus)? onVPNStatusChanged;
 
   /// OpenVPN's Constructions, don't forget to implement the listeners
   /// onVPNStatusChanged is a listener to see what status the connection was
@@ -44,7 +44,7 @@ class OpenVPNDart {
     String? providerBundleIdentifier,
     String? localizedDescription,
     String? groupIdentifier,
-    Function(VPNStatus status)? lastStatus,
+    Function(ConnectionStatus status)? lastStatus,
   }) async {
     if (Platform.isIOS) {
       assert(
@@ -98,12 +98,13 @@ class OpenVPNDart {
   }
 
   ///Check if connected to vpn
-  Future<bool> isConnected() async => getVPNStatus().then((value) => value == VPNStatus.connected);
+  Future<bool> isConnected() async =>
+      getVPNStatus().then((value) => value == ConnectionStatus.connected);
 
   ///Get latest connection status
-  Future<VPNStatus> getVPNStatus() async {
+  Future<ConnectionStatus> getVPNStatus() async {
     String? status = await _channelControl.invokeMethod("status");
-    return _strToStatus(status ?? "disconnected");
+    return ConnectionStatus.fromString(status ?? "disconnected");
   }
 
   ///Request android permission (Return true if already granted)
@@ -111,16 +112,13 @@ class OpenVPNDart {
     return _channelControl.invokeMethod("request_permission").then((value) => value ?? false);
   }
 
-  ///Convert String to VPNStatus
-  static VPNStatus _strToStatus(String? status) {
+  ///Convert String to ConnectionStatus
+  static ConnectionStatus _strToStatus(String? status) {
     status = status?.trim().toLowerCase();
     if (status == null || status.isEmpty || status == "idle" || status == "invalid") {
-      return VPNStatus.disconnected;
+      return ConnectionStatus.disconnected;
     }
-    return VPNStatus.values.firstWhere(
-      (element) => element.id == status,
-      orElse: () => VPNStatus.unknown,
-    );
+    return ConnectionStatus.fromString(status);
   }
 
   ///Initialize listener, called when you start connection and stoped when you disconnect
