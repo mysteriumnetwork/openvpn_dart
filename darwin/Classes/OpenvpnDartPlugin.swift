@@ -193,8 +193,6 @@ class VPNUtils {
         case .connecting: return "connecting"
         case .disconnected: return "disconnected"
         case .disconnecting: return "disconnecting"
-        case .invalid: return "invalid"
-        case .reasserting: return "reasserting"
         @unknown default: return "unknown"
         }
     }

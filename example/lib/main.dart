@@ -64,7 +64,7 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(status?.toString() ?? VPNStatus.disconnected.toString()),
+              Text(status?.toString() ?? ConnectionStatus.disconnected.toString()),
               TextButton(
                 child: const Text("Start"),
                 onPressed: () {
