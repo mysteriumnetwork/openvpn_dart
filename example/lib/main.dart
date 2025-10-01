@@ -20,16 +20,12 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late OpenVPNDart openVPNPlugin;
+  late Stream<ConnectionStatus> _statusStream;
+
   String? status;
   @override
   void initState() {
-    openVPNPlugin = OpenVPNDart(
-      onVPNStatusChanged: (data, raw) {
-        setState(() {
-          status = raw;
-        });
-      },
-    );
+    openVPNPlugin = OpenVPNDart();
 
     openVPNPlugin.initialize(
       providerBundleIdentifier:
@@ -43,14 +39,15 @@ class _MyAppState extends State<MyApp> {
         });
       },
     );
+    _statusStream = openVPNPlugin.statusStream();
     super.initState();
   }
 
   Future<void> initPlatformState() async {
     try {
-      await openVPNPlugin.connect(config);
+      await openVPNPlugin.connect(newConfig);
     } on Exception catch (e) {
-      print("Error: $e");
+      debugPrint("Error: $e");
     }
   }
 
@@ -136,6 +133,18 @@ class _MyAppState extends State<MyApp> {
                   }
                 },
               ),
+
+              StreamBuilder<ConnectionStatus>(
+                initialData: ConnectionStatus.unknown,
+                stream: _statusStream,
+                builder: (BuildContext context, AsyncSnapshot<ConnectionStatus> snapshot) {
+                  // Check if the snapshot has data and is a map containing the 'status' key
+                  if (snapshot.hasData) {
+                    return Text("Tunnel stream status: ${snapshot.data!.name}");
+                  }
+                  return const CircularProgressIndicator();
+                },
+              ),
             ],
           ),
         ),
@@ -191,4 +200,51 @@ jWeLs7XqlDNUtlmKWom9pJkHz4NZAmju9alajf7XkIg
 </auth-user-pass>
 
 
+''';
+
+final String newConfig = '''
+"ovpn_config": "client
+dev tun
+proto tcp
+remote 167.235.144.168 1194
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+
+client-cert-not-required
+auth-user-pass
+cipher AES-256-CBC
+auth SHA256
+data-ciphers AES-256-CBC
+verb 3
+
+<ca>
+-----BEGIN CERTIFICATE-----
+MIIDXTCCAkWgAwIBAgIUeWpW3vmG6W8g/jtfRrzhZI9uwrgwDQYJKoZIhvcNAQEL
+BQAwHDEaMBgGA1UEAwwRc3VwZXJ2cG4tdGVzdG5ldDAwHhcNMjUwODA1MDMxNTI4
+WhcNMzUwODAzMDMxNTI4WjAcMRowGAYDVQQDDBFzdXBlcnZwbi10ZXN0bmV0MDCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKr0nAwWsVC8g7ByUhzYvY8r
+QpR1tFRQdyCoPRMsIA79J6kkrBGGYlmkA56I6lzhvEv3Od0dRzvrtnT03yzAyAmU
+EFojVUQjxH9yj0VWPJ+pDIfukSSQAQ83BAFvEhR/27M+6N26HEd8TgRMJtUN8l4M
+uH14CpI+cYeoqd2B/C3tatsG8xneUT3T/E8NNYeTXqETtmMXl9S7tqkGz2+2x5Ie
+dOJK+FTUxrqgHvsSR/nb23FnARvU6kB2jt18tPdnvWyMZ2zyY/dV2EzdYcATSWdr
+5zqSXY2xy+sh5tpeVak4QcNPJ8B6gjD/rQqAWAyT7IpCW48Qk1Mw98nFdXcPwVMC
+AwEAAaOBljCBkzAdBgNVHQ4EFgQUTgZYUZissmpM0Pt0A5uxKYmNbOIwVwYDVR0j
+BFAwToAUTgZYUZissmpM0Pt0A5uxKYmNbOKhIKQeMBwxGjAYBgNVBAMMEXN1cGVy
+dnBuLXRlc3RuZXQwghR5albe+YbpbyD+O19GvOFkj27CuDAMBgNVHRMEBTADAQH/
+MAsGA1UdDwQEAwIBBjANBgkqhkiG9w0BAQsFAAOCAQEAmNmvzg0pJl55QTTle+/f
+HiCArWs6atuXNPw7UGPPgZIg6El8wIUccXIv9TKKO0FWfg5MfvrBJW5MqKY5KAwj
+e39z8fJ6LjVUVW689jsgsQBC9ag1lKzQ2Hm0T4q/NTiiOTmrQzf5LskwxDqBViNb
+NhHx3EGsegMMSFu1vY5PLGhWuRUX9n6JhgoyBBW7fGdK6auE+JWbKKn6jIvFqvsu
+Og7Xucsfjn7W6POtN1k/Bi3jR+ui6Bd+Jy5L+wmOAS9J2MUOEBuVVJlu1OB4/sgY
+MLUM00xZpx1x2FBrIGLhanF7qAYi5W+FKWII6d3Wn7XFR/R8sx5p15c40F7Rr/xs
+vg==
+-----END CERTIFICATE-----
+</ca>
+
+<auth-user-pass>
+d32b8ffc-28d9-4ce5-9375-b34c36828a21
+ExVpZ-p1Vk6cMLmxkM4OXfZj8UjfbJ0Eo_nUcUoAQFo
+</auth-user-pass>
 ''';
