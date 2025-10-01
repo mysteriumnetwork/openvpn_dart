@@ -87,8 +87,14 @@ class OpenVPNDart {
   }
 
   ///Disconnect from VPN
-  void disconnect() {
-    _channelControl.invokeMethod("disconnect");
+  Future<void> disconnect() async {
+    try {
+      await _channelControl.invokeMethod("disconnect");
+    } on PlatformException catch (e) {
+      throw Exception("Failed to disconnect VPN: ${e.message}");
+    } catch (e) {
+      throw Exception("Unexpected error while disconnecting VPN: $e");
+    }
   }
 
   ///Check if connected to vpn
