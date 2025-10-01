@@ -21,14 +21,9 @@ class OpenVPNDart {
   ///To indicate the engine already initialize
   bool initialized = false;
 
-  ConnectionStatus? _lastStatus;
-
-  /// is a listener to see what status the connection was
-  final Function(ConnectionStatus status, String rawStatus)? onVPNStatusChanged;
-
   /// OpenVPN's Constructions, don't forget to implement the listeners
   /// onVPNStatusChanged is a listener to see what status the connection was
-  OpenVPNDart({this.onVPNStatusChanged});
+  OpenVPNDart();
 
   ///This function should be called before any usage of OpenVPN
   ///All params required for iOS, make sure you read the plugin's documentation
@@ -54,7 +49,6 @@ class OpenVPNDart {
     }
 
     initialized = true;
-    _initializeListener();
     try {
       await _channelControl.invokeMethod("initialize", {
         "providerBundleIdentifier": providerBundleIdentifier,
@@ -122,13 +116,10 @@ class OpenVPNDart {
   }
 
   ///Initialize listener, called when you start connection and stoped when you disconnect
-  void _initializeListener() {
-    _vpnStatusSnapshot().listen((event) {
-      var vpnStatus = _strToStatus(event);
-      if (vpnStatus != _lastStatus) {
-        onVPNStatusChanged?.call(vpnStatus, event);
-        _lastStatus = vpnStatus;
-      }
+  /// is a listener to see what status the connection was
+  Stream<ConnectionStatus> statusStream() {
+    return _vpnStatusSnapshot().asBroadcastStream().distinct().map((event) {
+      return _strToStatus(event);
     });
   }
 
