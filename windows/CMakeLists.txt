@@ -55,7 +55,7 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 set(openvpn_dart_bundled_libraries
   "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/libpkcs11-helper-1.dll"
   "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/openvpn.exe"
-  "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/tap-windows-installer.dll"
+  "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/tap-windows-installer.exe"
   PARENT_SCOPE
 )
 
