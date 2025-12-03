@@ -203,17 +203,17 @@ jWeLs7XqlDNUtlmKWom9pJkHz4NZAmju9alajf7XkIg
 ''';
 
 final String newConfig = '''
-"ovpn_config": "client
+client
 dev tun
 proto tcp
-remote 167.235.144.168 1194
+remote 23.88.100.197 1194
 nobind
 persist-key
 persist-tun
 remote-cert-tls server
 
 client-cert-not-required
-auth-user-pass
+auth-user-pass inline
 cipher AES-256-CBC
 auth SHA256
 data-ciphers AES-256-CBC
@@ -244,7 +244,7 @@ vg==
 </ca>
 
 <auth-user-pass>
-d32b8ffc-28d9-4ce5-9375-b34c36828a21
-ExVpZ-p1Vk6cMLmxkM4OXfZj8UjfbJ0Eo_nUcUoAQFo
+b1c9af339f776072bbbfb4a1b526408808b0
+LjfEMsbBFFZfT5UkjO6czeIr64eJjpyGRCeqE3G97cg
 </auth-user-pass>
 ''';
