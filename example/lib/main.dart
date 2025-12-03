@@ -226,7 +226,7 @@ String get config {
   // Use platform-specific config option for client certificate verification
   // Windows OpenVPN 2.6+ requires 'verify-client-cert none'
   // iOS/macOS OpenVPNAdapter requires 'client-cert-not-required'
-  final certOption = Platform.isWindows ? 'verify-client-cert none' : 'client-cert-not-required';
+  final certOption = Platform.isWindows ? '' : 'client-cert-not-required';
 
   return '''
 client
