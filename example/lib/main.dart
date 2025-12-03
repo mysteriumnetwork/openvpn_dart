@@ -84,8 +84,7 @@ class _MyAppState extends State<MyApp> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-              Text(status?.toString() ??
-                  ConnectionStatus.disconnected.toString()),
+              Text(status?.toString() ?? ConnectionStatus.disconnected.toString()),
               TextButton(
                 child: const Text("Start"),
                 onPressed: () {
@@ -102,14 +101,12 @@ class _MyAppState extends State<MyApp> {
                 child: const Text("Check Tunnel"),
                 onPressed: () async {
                   try {
-                    bool exists =
-                        await openVPNPlugin.checkTunnelConfiguration();
+                    bool exists = await openVPNPlugin.checkTunnelConfiguration();
                     _messangerKey.currentState?.showSnackBar(
                       SnackBar(content: Text("Tunnel exists: $exists")),
                     );
                   } catch (e) {
-                    _messangerKey.currentState
-                        ?.showSnackBar(SnackBar(content: Text("Error: $e")));
+                    _messangerKey.currentState?.showSnackBar(SnackBar(content: Text("Error: $e")));
                   }
                 },
               ),
@@ -149,8 +146,7 @@ class _MyAppState extends State<MyApp> {
                   try {
                     final status = await openVPNPlugin.getVPNStatus();
                     _messangerKey.currentState?.showSnackBar(
-                      SnackBar(
-                          content: Text("Tunnel status retrieved: $status")),
+                      SnackBar(content: Text("Tunnel status retrieved: $status")),
                     );
                   } catch (e) {
                     _messangerKey.currentState?.showSnackBar(
@@ -169,12 +165,10 @@ class _MyAppState extends State<MyApp> {
                     final logFile = File(logPath);
                     if (await logFile.exists()) {
                       final logs = await logFile.readAsString();
-                      debugPrint(
-                          "===== OpenVPN Logs =====\n$logs\n===== End Logs =====");
+                      debugPrint("===== OpenVPN Logs =====\n$logs\n===== End Logs =====");
                       // Show last 300 characters in snackbar
-                      final preview = logs.length > 300
-                          ? '...${logs.substring(logs.length - 300)}'
-                          : logs;
+                      final preview =
+                          logs.length > 300 ? '...${logs.substring(logs.length - 300)}' : logs;
                       _messangerKey.currentState?.showSnackBar(
                         SnackBar(
                           content: Text("Log preview:\n$preview"),
@@ -183,8 +177,7 @@ class _MyAppState extends State<MyApp> {
                       );
                     } else {
                       _messangerKey.currentState?.showSnackBar(
-                        SnackBar(
-                            content: Text("Log file not found at: $logPath")),
+                        SnackBar(content: Text("Log file not found at: $logPath")),
                       );
                     }
                   } catch (e) {
@@ -197,8 +190,7 @@ class _MyAppState extends State<MyApp> {
               StreamBuilder<ConnectionStatus>(
                 initialData: ConnectionStatus.unknown,
                 stream: _statusStream,
-                builder: (BuildContext context,
-                    AsyncSnapshot<ConnectionStatus> snapshot) {
+                builder: (BuildContext context, AsyncSnapshot<ConnectionStatus> snapshot) {
                   // Check if the snapshot has data and is a map containing the 'status' key
                   if (snapshot.hasData) {
                     return Text("Tunnel stream status: ${snapshot.data!.name}");
@@ -224,6 +216,7 @@ persist-key
 persist-tun
 remote-cert-tls server
 
+client-cert-not-required
 auth-user-pass inline
 data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC:AES-128-CBC
 auth SHA256

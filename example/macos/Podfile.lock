@@ -37,7 +37,7 @@ CHECKOUT OPTIONS:
     :tag: 0.7.0
 
 SPEC CHECKSUMS:
-  FlutterMacOS: 8f6f14fa908a6fb3fba0cd85dbd81ec4b251fb24
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   openvpn_dart: 0b489fe858910d511562430cd6836ef39d53a667
   OpenVPNAdapter: 173fcc4c11a3a8a83ae8d250c079cdc5b9fb8ff1
 

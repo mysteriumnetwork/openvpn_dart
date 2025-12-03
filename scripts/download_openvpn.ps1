@@ -3,7 +3,7 @@
 
 param(
     [string]$OutputDir = "..\windows\openvpn_bundle",
-    [string]$OpenVPNVersion = "2.6.8"
+    [string]$OpenVPNVersion = "2.6.12"
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +20,7 @@ Write-Host "================================`n" -ForegroundColor Green
 
 # Create output directory
 Write-Info "Creating output directory: $OutputDir"
+$OutputDir = Join-Path $PSScriptRoot $OutputDir
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $OutputDir = Resolve-Path $OutputDir
 
@@ -63,40 +64,60 @@ $BinDir = $null
 $PossiblePaths = @(
     (Join-Path $ExtractDir "PFiles\OpenVPN\bin"),
     (Join-Path $ExtractDir "Program Files\OpenVPN\bin"),
-    (Join-Path $ExtractDir "OpenVPN\bin")
+    (Join-Path $ExtractDir "OpenVPN\bin"),
+    (Join-Path $ExtractDir "ProgramFiles\OpenVPN\bin")
 )
 
 foreach ($path in $PossiblePaths) {
     if (Test-Path $path) {
         $BinDir = $path
+        Write-Info "Found bin directory: $path"
         break
     }
 }
 
 if (-not $BinDir) {
-    Write-Failure "Could not find OpenVPN bin directory"
-    Write-Info "Extraction directory contents:"
-    Get-ChildItem $ExtractDir -Recurse | Where-Object { $_.Name -eq "openvpn.exe" } | ForEach-Object { Write-Host "  Found: $($_.FullName)" }
-    exit 1
+    Write-Warning "Could not find OpenVPN bin directory in expected locations"
+    Write-Info "Searching for openvpn.exe..."
+    $FoundExe = Get-ChildItem $ExtractDir -Recurse -Filter "openvpn.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($FoundExe) {
+        $BinDir = $FoundExe.DirectoryName
+        Write-Success "Found OpenVPN executable at: $BinDir"
+    } else {
+        Write-Failure "Could not find openvpn.exe anywhere in extraction directory"
+        Write-Info "Extraction directory structure:"
+        Get-ChildItem $ExtractDir -Recurse -Directory | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.FullName)" }
+        exit 1
+    }
 }
 
 Write-Info "Found OpenVPN binaries at: $BinDir"
 
 # Define required files
 $RequiredFiles = @(
-    "openvpn.exe",
-    "libeay32.dll",
-    "ssleay32.dll",
-    "liblzo2-2.dll",
-    "libpkcs11-helper-1.dll"
+    "openvpn.exe"
 )
 
-# Optional files (may not exist in all versions)
+# Optional files (DLL dependencies - names vary by OpenVPN version)
 $OptionalFiles = @(
+    # OpenSSL 3.x (newer versions)
+    "libcrypto-3-x64.dll",
+    "libssl-3-x64.dll",
+    # OpenSSL 1.1.x (older versions)
     "libcrypto-1_1-x64.dll",
     "libssl-1_1-x64.dll",
+    # Legacy OpenSSL
+    "libeay32.dll",
+    "ssleay32.dll",
+    # LZO compression
+    "liblzo2-2.dll",
+    # PKCS11
+    "libpkcs11-helper-1.dll",
+    # Visual C++ Runtime
     "msvcr120.dll",
-    "msvcp120.dll"
+    "msvcp120.dll",
+    "vcruntime140.dll",
+    "msvcp140.dll"
 )
 
 # Copy required files
@@ -131,6 +152,26 @@ foreach ($file in $OptionalFiles) {
     }
 }
 
+# Check if we have at least OpenSSL libraries (required for OpenVPN to work)
+$HasOpenSSL = $false
+$OpenSSLVariants = @("libcrypto-3-x64.dll", "libcrypto-1_1-x64.dll", "libeay32.dll")
+foreach ($variant in $OpenSSLVariants) {
+    if (Test-Path (Join-Path $OutputDir $variant)) {
+        $HasOpenSSL = $true
+        break
+    }
+}
+
+if (-not $HasOpenSSL) {
+    Write-Warning "No OpenSSL libraries found! OpenVPN may not work."
+    Write-Info "Searching for all DLLs in bin directory..."
+    Get-ChildItem $BinDir -Filter "*.dll" | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $OutputDir $_.Name) -Force
+        Write-Success "Copied $($_.Name) (auto-detected)"
+        $CopiedCount++
+    }
+}
+
 # Download TAP-Windows driver
 Write-Info "Downloading TAP-Windows driver..."
 $TapInstallerPath = Join-Path $OutputDir "tap-windows-installer.exe"
@@ -154,14 +195,7 @@ Write-Host "`n================================" -ForegroundColor Green
 Write-Host "Bundle Creation Summary" -ForegroundColor Green
 Write-Host "================================`n" -ForegroundColor Green
 
-if ($MissingFiles.Count -eq 0) {
-    Write-Success "All required files copied successfully!"
-} else {
-    Write-Warning "Missing $($MissingFiles.Count) required file(s):"
-    $MissingFiles | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
-}
-
-Write-Host "`nBundle location: $OutputDir" -ForegroundColor Cyan
+Write-Host "Bundle location: $OutputDir" -ForegroundColor Cyan
 Write-Host "`nBundled files ($CopiedCount):" -ForegroundColor Cyan
 Get-ChildItem $OutputDir | ForEach-Object { 
     $size = '{0:N2}' -f ($_.Length / 1KB)
@@ -170,6 +204,13 @@ Get-ChildItem $OutputDir | ForEach-Object {
 
 $TotalSize = (Get-ChildItem $OutputDir | Measure-Object -Property Length -Sum).Sum / 1MB
 Write-Host "`nTotal bundle size: $([math]::Round($TotalSize, 2)) MB" -ForegroundColor Cyan
+
+if ($MissingFiles.Count -eq 0) {
+    Write-Success "`nAll required files copied successfully!"
+} else {
+    Write-Warning "`nMissing $($MissingFiles.Count) required file(s):"
+    $MissingFiles | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+}
 
 # Verification
 Write-Host "`n================================" -ForegroundColor Green
@@ -200,10 +241,12 @@ Write-Host "3. Build your Flutter app: flutter build windows" -ForegroundColor W
 Write-Host "4. Test the bundled OpenVPN functionality" -ForegroundColor White
 
 Write-Host "Bundle creation completed successfully!" -ForegroundColor Green
+Write-Host "`nNote: Ensure all DLL dependencies are present for OpenVPN to work." -ForegroundColor Yellow
 
 # Return status
-if ($MissingFiles.Count -eq 0) {
+if ($MissingFiles.Count -eq 0 -and $CopiedCount -gt 1) {
     exit 0
 } else {
+    Write-Warning "Some files may be missing. Please verify the bundle."
     exit 1
 }

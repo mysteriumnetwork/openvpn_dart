@@ -3,19 +3,18 @@ version: 1.0.0+1
 description: "Demonstrates how to use the openvpn_dart plugin."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 environment:
   sdk: "^3.0.0"
   flutter: 3.35.3
-  
+
 dependencies:
   flutter:
     sdk: flutter
 
   openvpn_dart:
     path: ../
-
 
 dev_dependencies:
   integration_test:
@@ -25,5 +24,4 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 flutter:
-
   uses-material-design: true
