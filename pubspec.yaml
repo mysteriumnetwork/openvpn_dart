@@ -5,8 +5,8 @@ homepage: https://github.com/mysteriumnetwork/openvpn_dart
 repository: https://github.com/mysteriumnetwork/openvpn_dart
 
 environment:
-  sdk: ^3.7.2
-  flutter: '>=3.3.0'
+  sdk: "^3.0.0"
+  flutter: 3.35.3
 
 dependencies:
   flutter:
