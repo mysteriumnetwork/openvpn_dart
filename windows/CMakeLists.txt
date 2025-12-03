@@ -91,6 +91,22 @@ apply_standard_settings(${TEST_RUNNER})
 target_include_directories(${TEST_RUNNER} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${TEST_RUNNER} PRIVATE flutter_wrapper_plugin)
 target_link_libraries(${TEST_RUNNER} PRIVATE gtest_main gmock)
+
+# Copy OpenVPN bundle to output directory
+set(OPENVPN_BUNDLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle")
+
+# Install OpenVPN bundle with the plugin
+install(DIRECTORY "${OPENVPN_BUNDLE_DIR}/"
+        DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/openvpn_bundle"
+        COMPONENT Runtime)
+
+# List of bundled libraries (empty, as OpenVPN is in a separate directory)
+set(openvpn_dart_bundled_libraries
+  ""
+  PARENT_SCOPE
+)
+
+
 # flutter_wrapper_plugin has link dependencies on the Flutter DLL.
 add_custom_command(TARGET ${TEST_RUNNER} POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
