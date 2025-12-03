@@ -216,7 +216,7 @@ persist-key
 persist-tun
 remote-cert-tls server
 
-client-cert-not-required
+verify-client-cert none
 auth-user-pass inline
 data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC:AES-128-CBC
 auth SHA256

@@ -3,7 +3,7 @@
 
 param(
     [string]$OutputDir = "..\windows\openvpn_bundle",
-    [string]$OpenVPNVersion = "2.6.12"
+    [string]$OpenVPNVersion = "2.6.17"
 )
 
 $ErrorActionPreference = "Stop"
