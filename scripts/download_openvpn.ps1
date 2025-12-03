@@ -9,10 +9,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Colors for output
-function Write-Success { Write-Host "✓ $args" -ForegroundColor Green }
-function Write-Info { Write-Host "→ $args" -ForegroundColor Cyan }
-function Write-Warning { Write-Host "⚠ $args" -ForegroundColor Yellow }
-function Write-Failure { Write-Host "✗ $args" -ForegroundColor Red }
+function Write-Success { Write-Host "Success $args" -ForegroundColor Green }
+function Write-Info { Write-Host "Info $args" -ForegroundColor Cyan }
+function Write-Warning { Write-Host "Warning $args" -ForegroundColor Yellow }
+function Write-Failure { Write-Host "Failure $args" -ForegroundColor Red }
 
 Write-Host "`n================================" -ForegroundColor Green
 Write-Host "OpenVPN Bundle Downloader" -ForegroundColor Green
@@ -199,7 +199,7 @@ Write-Host "2. Update your Flutter app's windows/CMakeLists.txt" -ForegroundColo
 Write-Host "3. Build your Flutter app: flutter build windows" -ForegroundColor White
 Write-Host "4. Test the bundled OpenVPN functionality" -ForegroundColor White
 
-Write-Host "`n✓ Bundle creation completed successfully!`n" -ForegroundColor Green
+Write-Host "Bundle creation completed successfully!" -ForegroundColor Green
 
 # Return status
 if ($MissingFiles.Count -eq 0) {

@@ -32,3 +32,4 @@ flutter:
         sharedDarwinSource: true
       windows:
         pluginClass: OpenvpnDartPluginCApi
+        fileName: openvpn_dart_plugin.cpp
