@@ -33,6 +33,17 @@ class _MyAppState extends State<MyApp> {
     _initializeVPN();
   }
 
+  void _showSnackBar(String message, {bool isError = false}) {
+    _messangerKey.currentState?.clearSnackBars();
+    _messangerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : null,
+        duration: Duration(seconds: isError ? 5 : 3),
+      ),
+    );
+  }
+
   Future<void> _initializeVPN() async {
     try {
       await openVPNPlugin.initialize(
@@ -49,19 +60,24 @@ class _MyAppState extends State<MyApp> {
       setState(() {
         initError = null;
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
+      final errorMsg = e.toString();
       setState(() {
-        initError = e.toString();
+        initError = errorMsg;
       });
-      debugPrint("Initialization Error: $e");
+      debugPrint("Initialization Error: $errorMsg\nStack trace: $stackTrace");
+      _showSnackBar("Initialization failed: $errorMsg", isError: true);
     }
   }
 
   Future<void> initPlatformState() async {
     try {
       await openVPNPlugin.connect(config);
-    } on Exception catch (e) {
-      debugPrint("Error: $e");
+      _showSnackBar("VPN connection started");
+    } catch (e, stackTrace) {
+      final errorMsg = e.toString();
+      debugPrint("Connection Error: $errorMsg\nStack trace: $stackTrace");
+      _showSnackBar("Failed to connect: $errorMsg", isError: true);
     }
   }
 
@@ -94,19 +110,24 @@ class _MyAppState extends State<MyApp> {
               TextButton(
                 child: const Text("STOP"),
                 onPressed: () {
-                  openVPNPlugin.disconnect();
+                  try {
+                    openVPNPlugin.disconnect();
+                    _showSnackBar("VPN disconnection requested");
+                  } catch (e, stackTrace) {
+                    debugPrint("Disconnect Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Failed to disconnect: $e", isError: true);
+                  }
                 },
               ),
               TextButton(
                 child: const Text("Check Tunnel"),
                 onPressed: () async {
                   try {
-                    bool exists = await openVPNPlugin.checkTunnelConfiguration();
-                    _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Tunnel exists: $exists")),
-                    );
-                  } catch (e) {
-                    _messangerKey.currentState?.showSnackBar(SnackBar(content: Text("Error: $e")));
+                    final exists = await openVPNPlugin.checkTunnelConfiguration();
+                    _showSnackBar("Tunnel exists: $exists");
+                  } catch (e, stackTrace) {
+                    debugPrint("Check Tunnel Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Failed to check tunnel: $e", isError: true);
                   }
                 },
               ),
@@ -115,13 +136,10 @@ class _MyAppState extends State<MyApp> {
                 onPressed: () async {
                   try {
                     await openVPNPlugin.setupTunnel();
-                    _messangerKey.currentState?.showSnackBar(
-                      const SnackBar(content: Text("Tunnel setup succeeded")),
-                    );
-                  } catch (e) {
-                    _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Setup failed: $e")),
-                    );
+                    _showSnackBar("Tunnel setup succeeded");
+                  } catch (e, stackTrace) {
+                    debugPrint("Setup Tunnel Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Setup failed: $e", isError: true);
                   }
                 },
               ),
@@ -130,13 +148,10 @@ class _MyAppState extends State<MyApp> {
                 onPressed: () async {
                   try {
                     await openVPNPlugin.removeTunnelConfiguration();
-                    _messangerKey.currentState?.showSnackBar(
-                      const SnackBar(content: Text("Tunnel removed")),
-                    );
-                  } catch (e) {
-                    _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Remove failed: $e")),
-                    );
+                    _showSnackBar("Tunnel removed successfully");
+                  } catch (e, stackTrace) {
+                    debugPrint("Remove Tunnel Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Remove failed: $e", isError: true);
                   }
                 },
               ),
@@ -145,13 +160,10 @@ class _MyAppState extends State<MyApp> {
                 onPressed: () async {
                   try {
                     final status = await openVPNPlugin.getVPNStatus();
-                    _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Tunnel status retrieved: $status")),
-                    );
-                  } catch (e) {
-                    _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Remove failed: $e")),
-                    );
+                    _showSnackBar("Current status: ${status.name}");
+                  } catch (e, stackTrace) {
+                    debugPrint("Get Status Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Failed to get status: $e", isError: true);
                   }
                 },
               ),
@@ -159,16 +171,23 @@ class _MyAppState extends State<MyApp> {
                 child: const Text("Show Logs"),
                 onPressed: () async {
                   try {
-                    // Log path on Windows
+                    if (!Platform.isWindows) {
+                      _showSnackBar("Logs only available on Windows", isError: true);
+                      return;
+                    }
+
                     final logPath =
                         '${Platform.environment['LOCALAPPDATA']}\\OpenVPNDart\\config\\openvpn.log';
                     final logFile = File(logPath);
+
                     if (await logFile.exists()) {
                       final logs = await logFile.readAsString();
                       debugPrint("===== OpenVPN Logs =====\n$logs\n===== End Logs =====");
+
                       // Show last 300 characters in snackbar
                       final preview =
                           logs.length > 300 ? '...${logs.substring(logs.length - 300)}' : logs;
+                      _messangerKey.currentState?.clearSnackBars();
                       _messangerKey.currentState?.showSnackBar(
                         SnackBar(
                           content: Text("Log preview:\n$preview"),
@@ -176,14 +195,11 @@ class _MyAppState extends State<MyApp> {
                         ),
                       );
                     } else {
-                      _messangerKey.currentState?.showSnackBar(
-                        SnackBar(content: Text("Log file not found at: $logPath")),
-                      );
+                      _showSnackBar("Log file not found at: $logPath", isError: true);
                     }
-                  } catch (e) {
-                    _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Error reading logs: $e")),
-                    );
+                  } catch (e, stackTrace) {
+                    debugPrint("Show Logs Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Error reading logs: $e", isError: true);
                   }
                 },
               ),
@@ -206,7 +222,13 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
-String get config => '''
+String get config {
+  // Use platform-specific config option for client certificate verification
+  // Windows OpenVPN 2.6+ requires 'verify-client-cert none'
+  // iOS/macOS OpenVPNAdapter requires 'client-cert-not-required'
+  final certOption = Platform.isWindows ? 'verify-client-cert none' : 'client-cert-not-required';
+
+  return '''
 client
 dev tun
 proto tcp
@@ -216,7 +238,7 @@ persist-key
 persist-tun
 remote-cert-tls server
 
-verify-client-cert none
+$certOption
 auth-user-pass inline
 data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC:AES-128-CBC
 auth SHA256
@@ -250,3 +272,4 @@ LjfEMsbBFFZfT5UkjO6czeIr64eJjpyGRCeqE3G97cg
 </auth-user-pass>
 
 ''';
+}
