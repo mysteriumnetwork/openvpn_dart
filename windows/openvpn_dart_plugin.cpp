@@ -87,21 +87,55 @@ namespace openvpn_dart
 
   OpenVpnDartPlugin::~OpenVpnDartPlugin()
   {
-    StopVPN();
-    is_monitoring_ = false;
-    if (monitor_thread_.joinable())
+    try
     {
-      monitor_thread_.join();
-    }
-    if (log_thread_.joinable())
-    {
-      log_thread_.join();
-    }
+      OutputDebugStringA("OpenVpnDartPlugin destructor called");
 
-    if (pipe_read_)
-      CloseHandle(pipe_read_);
-    if (pipe_write_)
-      CloseHandle(pipe_write_);
+      // Signal threads to stop
+      is_monitoring_ = false;
+      is_connected_ = false;
+
+      // Stop VPN safely
+      try
+      {
+        StopVPN();
+      }
+      catch (const std::exception &e)
+      {
+        OutputDebugStringA(("Error in StopVPN during cleanup: " + std::string(e.what())).c_str());
+      }
+
+      // Wait for threads with timeout
+      if (monitor_thread_.joinable())
+      {
+        OutputDebugStringA("Waiting for monitor thread...");
+        monitor_thread_.join();
+      }
+      if (log_thread_.joinable())
+      {
+        OutputDebugStringA("Waiting for log thread...");
+        log_thread_.join();
+      }
+
+      // Clean up pipes
+      if (pipe_read_)
+      {
+        CloseHandle(pipe_read_);
+        pipe_read_ = nullptr;
+      }
+      if (pipe_write_)
+      {
+        CloseHandle(pipe_write_);
+        pipe_write_ = nullptr;
+      }
+
+      OutputDebugStringA("OpenVpnDartPlugin cleanup completed");
+    }
+    catch (...)
+    {
+      OutputDebugStringA("Critical error in OpenVpnDartPlugin destructor - suppressing exception");
+      // Never throw from destructor
+    }
   }
 
   std::string OpenVpnDartPlugin::GetPluginDataPath()
@@ -173,34 +207,67 @@ namespace openvpn_dart
       OutputDebugStringA(("Extracting from: " + source).c_str());
       OutputDebugStringA(("Extracting to: " + dest).c_str());
 
+      if (source.empty() || dest.empty())
+      {
+        OutputDebugStringA("Invalid source or destination path");
+        return false;
+      }
+
       if (!std::filesystem::exists(source))
       {
-        OutputDebugStringA("Source bundle not found!");
-        return false; // Bundle not found
+        OutputDebugStringA(("Source bundle not found: " + source).c_str());
+        return false;
+      }
+
+      // Ensure destination directory exists
+      try
+      {
+        std::filesystem::create_directories(dest);
+      }
+      catch (const std::filesystem::filesystem_error &e)
+      {
+        OutputDebugStringA(("Failed to create destination directory: " + std::string(e.what())).c_str());
+        return false;
       }
 
       // Copy all files from bundle to destination
       int file_count = 0;
+      int error_count = 0;
+
       for (const auto &entry : std::filesystem::recursive_directory_iterator(source))
       {
-        if (entry.is_regular_file())
+        try
         {
-          std::filesystem::path relative = std::filesystem::relative(entry.path(), source);
-          std::filesystem::path dest_file = std::filesystem::path(dest) / relative;
+          if (entry.is_regular_file())
+          {
+            std::filesystem::path relative = std::filesystem::relative(entry.path(), source);
+            std::filesystem::path dest_file = std::filesystem::path(dest) / relative;
 
-          std::filesystem::create_directories(dest_file.parent_path());
-          std::filesystem::copy_file(entry.path(), dest_file,
-                                     std::filesystem::copy_options::overwrite_existing);
-          file_count++;
-          OutputDebugStringA(("Copied: " + dest_file.string()).c_str());
+            std::filesystem::create_directories(dest_file.parent_path());
+            std::filesystem::copy_file(entry.path(), dest_file,
+                                       std::filesystem::copy_options::overwrite_existing);
+            file_count++;
+            OutputDebugStringA(("Copied: " + dest_file.string()).c_str());
+          }
+        }
+        catch (const std::filesystem::filesystem_error &e)
+        {
+          error_count++;
+          OutputDebugStringA(("Failed to copy file: " + std::string(e.what())).c_str());
         }
       }
 
-      OutputDebugStringA(("Extracted " + std::to_string(file_count) + " files").c_str());
-      return true;
+      OutputDebugStringA(("Extracted " + std::to_string(file_count) + " files with " + std::to_string(error_count) + " errors").c_str());
+      return file_count > 0 && error_count == 0;
     }
-    catch (const std::exception &)
+    catch (const std::exception &e)
     {
+      OutputDebugStringA(("Exception in ExtractBundledOpenVPN: " + std::string(e.what())).c_str());
+      return false;
+    }
+    catch (...)
+    {
+      OutputDebugStringA("Unknown exception in ExtractBundledOpenVPN");
       return false;
     }
   }
@@ -488,40 +555,80 @@ namespace openvpn_dart
 
   void OpenVpnDartPlugin::StartVPN(const std::string &config)
   {
+    OutputDebugStringA(("StartVPN called with config length: " + std::to_string(config.length())).c_str());
+
+    // Validate input
+    if (config.empty())
+    {
+      throw std::invalid_argument("OpenVPN configuration cannot be empty\");
+    }
+
+    if (config.length() > 1024 * 1024) // 1MB limit
+    {
+      throw std::invalid_argument("OpenVPN configuration too large (> 1MB)\");
+    }
+
+    // Verify OpenVPN executable exists
+    if (!std::filesystem::exists(openvpn_executable_path_))
+    {
+      throw std::runtime_error("OpenVPN executable not found at: \" + openvpn_executable_path_);
+    }
+
     // Ensure previous connection is fully stopped
     if (is_connected_ || is_monitoring_)
     {
       OutputDebugStringA("Stopping previous VPN connection before starting new one");
-      is_monitoring_ = false;
-      is_connected_ = false;
 
-      // Wait for monitoring thread to exit
-      if (monitor_thread_.joinable())
+      try
       {
-        OutputDebugStringA("Waiting for monitor thread to join...");
-        monitor_thread_.join();
-        OutputDebugStringA("Monitor thread joined");
-      }
+        is_monitoring_ = false;
+        is_connected_ = false;
 
-      // Now call StopVPN to clean up process
-      StopVPN();
+        // Wait for monitoring thread to exit
+        if (monitor_thread_.joinable())
+        {
+          OutputDebugStringA("Waiting for monitor thread to join...");
+          monitor_thread_.join();
+          OutputDebugStringA("Monitor thread joined");
+        }
+
+        // Now call StopVPN to clean up process
+        StopVPN();
+      }
+      catch (const std::exception &e)
+      {
+        OutputDebugStringA((\"Error stopping previous connection: \" + std::string(e.what())).c_str());
+        // Continue anyway - try to start new connection
+      }
     }
 
-    // Create directories
+    // Create directories with error handling
     std::filesystem::path temp_dir = std::filesystem::path(bundled_path_) / "config";
-    std::filesystem::create_directories(temp_dir);
+
+    try
+    {
+      std::filesystem::create_directories(temp_dir);
+    }
+    catch (const std::filesystem::filesystem_error &e)
+    {
+      throw std::runtime_error("Failed to create config directory: " + std::string(e.what()));
+    }
 
     config_file_path_ = (temp_dir / "client.ovpn").string();
     log_file_path_ = (temp_dir / "openvpn.log").string();
 
-    // Write config to file
-    std::ofstream config_file(config_file_path_);
-    if (!config_file.is_open())
+    // Write config to file with error handling
+    // Clean up any existing pipes
+    if (pipe_read_ != nullptr && pipe_read_ != INVALID_HANDLE_VALUE)
     {
-      throw std::runtime_error("Failed to create config file");
+      CloseHandle(pipe_read_);
+      pipe_read_ = nullptr;
     }
-    config_file << config;
-    config_file.close();
+    if (pipe_write_ != nullptr && pipe_write_ != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle(pipe_write_);
+      pipe_write_ = nullptr;
+    }
 
     // Create pipe for reading OpenVPN output
     SECURITY_ATTRIBUTES sa = {0};
@@ -531,154 +638,192 @@ namespace openvpn_dart
 
     if (!CreatePipe(&pipe_read_, &pipe_write_, &sa, 0))
     {
-      throw std::runtime_error("Failed to create pipe");
+      DWORD error = GetLastError();
+      throw std::runtime_error("Failed to create pipe. Error: " + std::to_string(error));
     }
 
-    SetHandleInformation(pipe_read_, HANDLE_FLAG_INHERIT, 0);
-
-    // Prepare command line with detailed logging
-    std::string command_line = "\"" + openvpn_executable_path_ + "\"";
-    command_line += " --config \"" + config_file_path_ + "\"";
-    command_line += " --log \"" + log_file_path_ + "\"";
-    command_line += " --verb 3";
-    command_line += " --route-method exe";            // Use external routing method for Windows
-    command_line += " --route-delay 2";               // Give Windows time to set up routes
-    command_line += " --windows-driver tap-windows6"; // Use TAP-Windows6 driver
-
-    OutputDebugStringA(("Starting OpenVPN with command: " + command_line).c_str());
-    OutputDebugStringA(("Log file path: " + log_file_path_).c_str());
-
-    // Setup process creation
-    STARTUPINFOA si = {0};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.hStdOutput = pipe_write_;
-    si.hStdError = pipe_write_;
-    si.wShowWindow = SW_HIDE;
-
-    ZeroMemory(&process_info_, sizeof(process_info_));
-
-    // Create the OpenVPN process
-    BOOL success = CreateProcessA(
-        nullptr,
-        const_cast<char *>(command_line.c_str()),
-        nullptr,
-        nullptr,
-        TRUE, // Inherit handles
-        CREATE_NO_WINDOW,
-        nullptr,
-        nullptr,
-        &si,
-        &process_info_);
-
-    if (!success)
+    if (!SetHandleInformation(pipe_read_, HANDLE_FLAG_INHERIT, 0))
     {
       DWORD error = GetLastError();
-      std::string error_msg = "Failed to start OpenVPN. Error code: " + std::to_string(error);
-      if (error == 740)
-      {
-        error_msg += " (Elevation required)";
-      }
-      else if (error == 2)
-      {
-        error_msg += " (File not found: " + openvpn_executable_path_ + ")";
-      }
-      OutputDebugStringA(error_msg.c_str());
       CloseHandle(pipe_read_);
       CloseHandle(pipe_write_);
       pipe_read_ = nullptr;
       pipe_write_ = nullptr;
-      throw std::runtime_error(error_msg);
+      throw std::runtime_error("Failed to set pipe handle information. Error: " + std::to_string(error));
+    }
+    {
+      throw std::runtime_error("Failed to write config data to file");
     }
 
-    OutputDebugStringA("OpenVPN process created successfully");
-    process_handle_ = process_info_.hProcess;
-    is_connected_ = true;
+    config_file.close();
+    OutputDebugStringA(("Config file written successfully: " + config_file_path_).c_str());
+  }
+  catch (const std::exception &e)
+  {
+    config_file.close();
+    throw std::runtime_error("Error writing config file: " + std::string(e.what()));
+  }
 
-    // Check if process is still running and look for early errors
-    DWORD exit_code;
-    Sleep(500); // Give it a moment to start and write logs
+  // Create pipe for reading OpenVPN output
+  SECURITY_ATTRIBUTES sa = {0};
+  sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+  sa.bInheritHandle = TRUE;
+  sa.lpSecurityDescriptor = nullptr;
 
-    bool process_exited = false;
-    if (GetExitCodeProcess(process_handle_, &exit_code) && exit_code != STILL_ACTIVE)
+  if (!CreatePipe(&pipe_read_, &pipe_write_, &sa, 0))
+  {
+    throw std::runtime_error("Failed to create pipe");
+  }
+
+  SetHandleInformation(pipe_read_, HANDLE_FLAG_INHERIT, 0);
+
+  // Prepare command line with detailed logging
+  std::string command_line = "\"" + openvpn_executable_path_ + "\"";
+  command_line += " --config \"" + config_file_path_ + "\"";
+  command_line += " --log \"" + log_file_path_ + "\"";
+  command_line += " --verb 3";
+  command_line += " --route-method exe";            // Use external routing method for Windows
+  command_line += " --route-delay 2";               // Give Windows time to set up routes
+  command_line += " --windows-driver tap-windows6"; // Use TAP-Windows6 driver
+
+  OutputDebugStringA(("Starting OpenVPN with command: " + command_line).c_str());
+  OutputDebugStringA(("Log file path: " + log_file_path_).c_str());
+
+  // Setup process creation
+  STARTUPINFOA si = {0};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+  si.hStdOutput = pipe_write_;
+  si.hStdError = pipe_write_;
+  si.wShowWindow = SW_HIDE;
+
+  ZeroMemory(&process_info_, sizeof(process_info_));
+
+  // Create the OpenVPN process
+  BOOL success = CreateProcessA(
+      nullptr,
+      const_cast<char *>(command_line.c_str()),
+      nullptr,
+      nullptr,
+      TRUE, // Inherit handles
+      CREATE_NO_WINDOW,
+      nullptr,
+      nullptr,
+      &si,
+      &process_info_);
+
+  if (!success)
+  {
+    DWORD error = GetLastError();
+    std::string error_msg = "Failed to start OpenVPN. Error code: " + std::to_string(error);
+    if (error == 740)
     {
-      process_exited = true;
-      std::string exit_msg = "OpenVPN process exited with code " + std::to_string(exit_code);
-      OutputDebugStringA(exit_msg.c_str());
+      error_msg += " (Elevation required)";
+    }
+    else if (error == 2)
+    {
+      error_msg += " (File not found: " + openvpn_executable_path_ + ")";
+    }
+    OutputDebugStringA(error_msg.c_str());
+    CloseHandle(pipe_read_);
+    CloseHandle(pipe_write_);
+    pipe_read_ = nullptr;
+    pipe_write_ = nullptr;
+    throw std::runtime_error(error_msg);
+  }
 
-      // Try to read error from log file
-      if (std::filesystem::exists(log_file_path_))
+  OutputDebugStringA("OpenVPN process created successfully");
+  process_handle_ = process_info_.hProcess;
+  is_connected_ = true;
+
+  // Check if process is still running and look for early errors
+  DWORD exit_code;
+  Sleep(500); // Give it a moment to start and write logs
+
+  bool process_exited = false;
+  if (GetExitCodeProcess(process_handle_, &exit_code) && exit_code != STILL_ACTIVE)
+  {
+    process_exited = true;
+    std::string exit_msg = "OpenVPN process exited with code " + std::to_string(exit_code);
+    OutputDebugStringA(exit_msg.c_str());
+
+    // Try to read error from log file
+    if (std::filesystem::exists(log_file_path_))
+    {
+      std::ifstream log_file(log_file_path_);
+      std::string line, error_detail;
+      while (std::getline(log_file, line))
       {
-        std::ifstream log_file(log_file_path_);
-        std::string line, error_detail;
-        while (std::getline(log_file, line))
+        if (line.find("AUTH_FAILED") != std::string::npos ||
+            line.find("ERROR") != std::string::npos ||
+            line.find("FATAL") != std::string::npos)
         {
-          if (line.find("AUTH_FAILED") != std::string::npos ||
-              line.find("ERROR") != std::string::npos ||
-              line.find("FATAL") != std::string::npos)
+          error_detail = line;
+        }
+      }
+      log_file.close();
+
+      if (!error_detail.empty())
+      {
+        // Sanitize the error message
+        for (char &c : error_detail)
+        {
+          if (static_cast<unsigned char>(c) > 127)
           {
-            error_detail = line;
+            c = '?';
           }
         }
-        log_file.close();
-
-        if (!error_detail.empty())
-        {
-          // Sanitize the error message
-          for (char &c : error_detail)
-          {
-            if (static_cast<unsigned char>(c) > 127)
-            {
-              c = '?';
-            }
-          }
-          exit_msg += ": " + error_detail;
-        }
-      }
-
-      OutputDebugStringA(("Full error: " + exit_msg).c_str());
-
-      // Process already exited - this is an error
-      is_connected_ = false;
-      CloseHandle(process_info_.hProcess);
-      CloseHandle(process_info_.hThread);
-      CloseHandle(pipe_read_);
-      CloseHandle(pipe_write_);
-      pipe_read_ = nullptr;
-      pipe_write_ = nullptr;
-      process_handle_ = nullptr;
-      throw std::runtime_error(exit_msg);
-    }
-
-    // Update status and send to Flutter immediately
-    {
-      std::lock_guard<std::mutex> lock(status_mutex_);
-      current_status_ = "connecting";
-    }
-
-    // Send initial connecting status to Flutter
-    {
-      std::lock_guard<std::mutex> lock(event_sink_mutex_);
-      if (event_sink_)
-      {
-        OutputDebugStringA("Sending 'connecting' status to Flutter");
-        event_sink_->Success(flutter::EncodableValue("connecting"));
-      }
-      else
-      {
-        OutputDebugStringA("Warning: event_sink is null, cannot send connecting status");
+        exit_msg += ": " + error_detail;
       }
     }
 
-    // Start monitoring thread
-    if (!is_monitoring_)
+    OutputDebugStringA(("Full error: " + exit_msg).c_str());
+
+    // Process already exited - this is an error
+    is_connected_ = false;
+    CloseHandle(process_info_.hProcess);
+    CloseHandle(process_info_.hThread);
+    CloseHandle(pipe_read_);
+    CloseHandle(pipe_write_);
+    pipe_read_ = nullptr;
+    pipe_write_ = nullptr;
+    process_handle_ = nullptr;
+    throw std::runtime_error(exit_msg);
+  }
+
+  // Update status and send to Flutter immediately
+  {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    current_status_ = "connecting";
+  }
+
+  // Send initial connecting status to Flutter
+  {
+    std::lock_guard<std::mutex> lock(event_sink_mutex_);
+    if (event_sink_)
     {
-      is_monitoring_ = true;
-      monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
+      OutputDebugStringA("Sending 'connecting' status to Flutter");
+      event_sink_->Success(flutter::EncodableValue("connecting"));
+    }
+    else
+    {
+      OutputDebugStringA("Warning: event_sink is null, cannot send connecting status");
     }
   }
 
-  void OpenVpnDartPlugin::StopVPN()
+  // Start monitoring thread
+  if (!is_monitoring_)
+  {
+    is_monitoring_ = true;
+    monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
+  }
+}
+
+void OpenVpnDartPlugin::StopVPN()
+{
+  OutputDebugStringA("StopVPN called");
+
+  try
   {
     // Send disconnecting status
     {
@@ -690,34 +835,65 @@ namespace openvpn_dart
       std::lock_guard<std::mutex> lock(event_sink_mutex_);
       if (event_sink_)
       {
-        OutputDebugStringA("Sending 'disconnecting' status to Flutter");
-        event_sink_->Success(flutter::EncodableValue("disconnecting"));
+        try
+        {
+          OutputDebugStringA("Sending 'disconnecting' status to Flutter");
+          event_sink_->Success(flutter::EncodableValue("disconnecting"));
+        }
+        catch (const std::exception &e)
+        {
+          OutputDebugStringA(("Failed to send disconnecting status: " + std::string(e.what())).c_str());
+        }
       }
     }
 
     // Give the disconnecting status time to be processed
     Sleep(100);
 
-    // Terminate the process gracefully first
+    // Terminate the process gracefully
     if (process_handle_ != nullptr)
     {
+      OutputDebugStringA("Terminating OpenVPN process...");
+
       // Try graceful shutdown
-      TerminateProcess(process_handle_, 0);
-      WaitForSingleObject(process_handle_, 5000);
-      CloseHandle(process_info_.hProcess);
-      if (process_info_.hThread != nullptr)
+      if (!TerminateProcess(process_handle_, 0))
+      {
+        DWORD error = GetLastError();
+        OutputDebugStringA(("TerminateProcess failed with error: " + std::to_string(error)).c_str());
+      }
+
+      // Wait for process to exit with timeout
+      DWORD wait_result = WaitForSingleObject(process_handle_, 5000);
+      if (wait_result == WAIT_TIMEOUT)
+      {
+        OutputDebugStringA("Process did not exit within timeout, forcing termination");
+      }
+
+      // Clean up handles safely
+      if (process_info_.hProcess != nullptr && process_info_.hProcess != INVALID_HANDLE_VALUE)
+      {
+        CloseHandle(process_info_.hProcess);
+      }
+      if (process_info_.hThread != nullptr && process_info_.hThread != INVALID_HANDLE_VALUE)
       {
         CloseHandle(process_info_.hThread);
       }
+
       process_handle_ = nullptr;
       ZeroMemory(&process_info_, sizeof(process_info_));
+      OutputDebugStringA("Process terminated");
     }
 
-    // Close pipes
-    if (pipe_write_)
+    // Close pipes safely
+    if (pipe_write_ != nullptr && pipe_write_ != INVALID_HANDLE_VALUE)
     {
       CloseHandle(pipe_write_);
       pipe_write_ = nullptr;
+    }
+    if (pipe_read_ != nullptr && pipe_read_ != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle(pipe_read_);
+      pipe_read_ = nullptr;
     }
 
     // Set flags to false to stop monitoring thread
@@ -727,11 +903,15 @@ namespace openvpn_dart
     // Wait for threads to finish
     if (monitor_thread_.joinable())
     {
+      OutputDebugStringA("Waiting for monitor thread to finish...");
       monitor_thread_.join();
+      OutputDebugStringA("Monitor thread finished");
     }
     if (log_thread_.joinable())
     {
+      OutputDebugStringA("Waiting for log thread to finish...");
       log_thread_.join();
+      OutputDebugStringA("Log thread finished");
     }
 
     // Update status to disconnected
@@ -745,15 +925,41 @@ namespace openvpn_dart
       std::lock_guard<std::mutex> lock(event_sink_mutex_);
       if (event_sink_)
       {
-        OutputDebugStringA("Sending 'disconnected' status to Flutter");
-        event_sink_->Success(flutter::EncodableValue("disconnected"));
+        try
+        {
+          OutputDebugStringA("Sending 'disconnected' status to Flutter");
+          event_sink_->Success(flutter::EncodableValue("disconnected"));
+        }
+        catch (const std::exception &e)
+        {
+          OutputDebugStringA(("Failed to send disconnected status: " + std::string(e.what())).c_str());
+        }
       }
     }
-  }
 
-  void OpenVpnDartPlugin::MonitorVPNStatus()
+    OutputDebugStringA("StopVPN completed successfully");
+  }
+  catch (const std::exception &e)
   {
-    OutputDebugStringA("MonitorVPNStatus thread started");
+    OutputDebugStringA(("Exception in StopVPN: " + std::string(e.what())).c_str());
+    // Ensure flags are reset even on error
+    is_connected_ = false;
+    is_monitoring_ = false;
+  }
+  catch (...)
+  {
+    OutputDebugStringA("Unknown exception in StopVPN");
+    is_connected_ = false;
+    is_monitoring_ = false;
+  }
+}
+
+void OpenVpnDartPlugin::MonitorVPNStatus()
+{
+  OutputDebugStringA("MonitorVPNStatus thread started");
+
+  try
+  {
     std::string last_status = "";
     bool connection_established = false;
 
@@ -879,148 +1085,190 @@ namespace openvpn_dart
       Sleep(1000); // Check every second
     }
 
-    OutputDebugStringA("MonitorVPNStatus thread exiting");
-    is_monitoring_ = false;
+    OutputDebugStringA("MonitorVPNStatus thread exiting normally");
   }
-
-  std::string OpenVpnDartPlugin::GetCurrentStatus()
+  catch (const std::exception &e)
   {
-    std::lock_guard<std::mutex> lock(status_mutex_);
-    return current_status_;
-  }
+    OutputDebugStringA(("Exception in MonitorVPNStatus: " + std::string(e.what())).c_str());
 
-  bool OpenVpnDartPlugin::IsVPNRunning()
-  {
-    return is_connected_ && process_handle_ != nullptr;
-  }
-
-  void OpenVpnDartPlugin::CheckExistingConnection()
-  {
-    OutputDebugStringA("Checking for existing OpenVPN connection...");
-
-    // Set up log file path
-    log_file_path_ = bundled_path_ + "\\config\\openvpn.log";
-
-    // Check if log file exists and has recent "Initialization Sequence Completed" message
-    if (std::filesystem::exists(log_file_path_))
+    // Update status to error on exception
+    try
     {
-      try
+      std::lock_guard<std::mutex> lock(status_mutex_);
+      current_status_ = "disconnected";
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+      std::lock_guard<std::mutex> sink_lock(event_sink_mutex_);
+      if (event_sink_)
       {
-        std::ifstream log_file(log_file_path_);
-        if (log_file.is_open())
+        event_sink_->Success(flutter::EncodableValue("disconnected"));
+      }
+    }
+    catch (...)
+    {
+    }
+  }
+  catch (...)
+  {
+    OutputDebugStringA("Unknown exception in MonitorVPNStatus thread");
+  }
+
+  is_monitoring_ = false;
+  is_connected_ = false;
+  OutputDebugStringA("MonitorVPNStatus thread terminated");
+}
+
+std::string OpenVpnDartPlugin::GetCurrentStatus()
+{
+  std::lock_guard<std::mutex> lock(status_mutex_);
+  return current_status_;
+}
+
+bool OpenVpnDartPlugin::IsVPNRunning()
+{
+  return is_connected_ && process_handle_ != nullptr;
+}
+
+void OpenVpnDartPlugin::CheckExistingConnection()
+{
+  OutputDebugStringA("Checking for existing OpenVPN connection...");
+
+  // Set up log file path
+  log_file_path_ = bundled_path_ + "\\config\\openvpn.log";
+
+  // Check if log file exists and has recent "Initialization Sequence Completed" message
+  if (std::filesystem::exists(log_file_path_))
+  {
+    try
+    {
+      std::ifstream log_file(log_file_path_);
+      if (log_file.is_open())
+      {
+        std::string line;
+        bool found_connected = false;
+        bool found_exit = false;
+
+        while (std::getline(log_file, line))
         {
-          std::string line;
-          bool found_connected = false;
-          bool found_exit = false;
-
-          while (std::getline(log_file, line))
+          if (line.find("Initialization Sequence Completed") != std::string::npos)
           {
-            if (line.find("Initialization Sequence Completed") != std::string::npos)
-            {
-              found_connected = true;
-            }
-            else if (line.find("process exiting") != std::string::npos ||
-                     line.find("SIGTERM") != std::string::npos)
-            {
-              found_exit = true;
-            }
+            found_connected = true;
           }
-          log_file.close();
-
-          // If we found connection but no exit, check if process is still running
-          if (found_connected && !found_exit)
+          else if (line.find("process exiting") != std::string::npos ||
+                   line.find("SIGTERM") != std::string::npos)
           {
-            // Try to find the OpenVPN process by name
-            HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snapshot != INVALID_HANDLE_VALUE)
+            found_exit = true;
+          }
+        }
+        log_file.close();
+
+        // If we found connection but no exit, check if process is still running
+        if (found_connected && !found_exit)
+        {
+          // Try to find the OpenVPN process by name
+          HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+          if (snapshot != INVALID_HANDLE_VALUE)
+          {
+            PROCESSENTRY32 pe32;
+            pe32.dwSize = sizeof(PROCESSENTRY32);
+
+            if (Process32First(snapshot, &pe32))
             {
-              PROCESSENTRY32 pe32;
-              pe32.dwSize = sizeof(PROCESSENTRY32);
-
-              if (Process32First(snapshot, &pe32))
+              do
               {
-                do
+                // Convert wide string to narrow string
+                char processName[MAX_PATH];
+                WideCharToMultiByte(CP_ACP, 0, pe32.szExeFile, -1, processName, MAX_PATH, NULL, NULL);
+
+                if (strcmp(processName, "openvpn.exe") == 0)
                 {
-                  // Convert wide string to narrow string
-                  char processName[MAX_PATH];
-                  WideCharToMultiByte(CP_ACP, 0, pe32.szExeFile, -1, processName, MAX_PATH, NULL, NULL);
-
-                  if (strcmp(processName, "openvpn.exe") == 0)
+                  // Found OpenVPN process - check if it's ours by command line
+                  HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pe32.th32ProcessID);
+                  if (hProcess != nullptr)
                   {
-                    // Found OpenVPN process - check if it's ours by command line
-                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pe32.th32ProcessID);
-                    if (hProcess != nullptr)
+                    OutputDebugStringA(("Found existing OpenVPN process with PID " + std::to_string(pe32.th32ProcessID)).c_str());
+
+                    // Set up our state to monitor this process
+                    process_handle_ = hProcess;
+                    ZeroMemory(&process_info_, sizeof(process_info_));
+                    process_info_.hProcess = hProcess;
+                    process_info_.hThread = nullptr; // We don't have the thread handle for existing process
+                    process_info_.dwProcessId = pe32.th32ProcessID;
+                    is_connected_ = true;
+
                     {
-                      OutputDebugStringA(("Found existing OpenVPN process with PID " + std::to_string(pe32.th32ProcessID)).c_str());
-
-                      // Set up our state to monitor this process
-                      process_handle_ = hProcess;
-                      ZeroMemory(&process_info_, sizeof(process_info_));
-                      process_info_.hProcess = hProcess;
-                      process_info_.hThread = nullptr; // We don't have the thread handle for existing process
-                      process_info_.dwProcessId = pe32.th32ProcessID;
-                      is_connected_ = true;
-
-                      {
-                        std::lock_guard<std::mutex> lock(status_mutex_);
-                        current_status_ = "connected";
-                      }
-
-                      // Start monitoring thread
-                      if (!is_monitoring_)
-                      {
-                        is_monitoring_ = true;
-                        monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
-                      }
-
-                      OutputDebugStringA("Attached to existing OpenVPN connection");
-                      break;
+                      std::lock_guard<std::mutex> lock(status_mutex_);
+                      current_status_ = "connected";
                     }
+
+                    // Start monitoring thread
+                    if (!is_monitoring_)
+                    {
+                      is_monitoring_ = true;
+                      monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
+                    }
+
+                    OutputDebugStringA("Attached to existing OpenVPN connection");
+                    break;
                   }
-                } while (Process32Next(snapshot, &pe32));
-              }
-              CloseHandle(snapshot);
+                }
+              } while (Process32Next(snapshot, &pe32));
             }
+            CloseHandle(snapshot);
           }
         }
       }
-      catch (const std::exception &e)
-      {
-        OutputDebugStringA(("Error checking existing connection: " + std::string(e.what())).c_str());
-      }
     }
-
-    if (!is_connected_)
+    catch (const std::exception &e)
     {
-      OutputDebugStringA("No existing OpenVPN connection found");
+      OutputDebugStringA(("Error checking existing connection: " + std::string(e.what())).c_str());
     }
-  }
-
-  std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>>
-  OpenVpnDartPlugin::OnListenInternal(
-      const flutter::EncodableValue *arguments,
-      std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> &&events)
-  {
-    std::lock_guard<std::mutex> lock(event_sink_mutex_);
-    event_sink_ = std::move(events);
-
-    // Always send current status when stream listener attaches
-    if (event_sink_)
+    catch (...)
     {
-      std::string status = GetCurrentStatus();
-      OutputDebugStringA(("Sending initial status on stream listen: " + status).c_str());
-      event_sink_->Success(flutter::EncodableValue(status));
+      OutputDebugStringA("Unknown error checking existing connection");
     }
-
-    return nullptr;
   }
 
-  std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>>
-  OpenVpnDartPlugin::OnCancelInternal(const flutter::EncodableValue *arguments)
+  if (!is_connected_)
   {
-    std::lock_guard<std::mutex> lock(event_sink_mutex_);
-    event_sink_.reset();
-    return nullptr;
+    OutputDebugStringA("No existing OpenVPN connection found");
   }
+  else
+  {
+    OutputDebugStringA("Successfully attached to existing connection");
+  }
+}
+
+std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>>
+OpenVpnDartPlugin::OnListenInternal(
+    const flutter::EncodableValue *arguments,
+    std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> &&events)
+{
+  std::lock_guard<std::mutex> lock(event_sink_mutex_);
+  event_sink_ = std::move(events);
+
+  // Always send current status when stream listener attaches
+  if (event_sink_)
+  {
+    std::string status = GetCurrentStatus();
+    OutputDebugStringA(("Sending initial status on stream listen: " + status).c_str());
+    event_sink_->Success(flutter::EncodableValue(status));
+  }
+
+  return nullptr;
+}
+
+std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>>
+OpenVpnDartPlugin::OnCancelInternal(const flutter::EncodableValue *arguments)
+{
+  std::lock_guard<std::mutex> lock(event_sink_mutex_);
+  event_sink_.reset();
+  return nullptr;
+}
 
 } // namespace openvpn_dart
