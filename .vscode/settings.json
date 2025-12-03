@@ -3,6 +3,7 @@
   "files.associations": {
     "*.yaml": "yaml",
     "xstring": "cpp",
-    "mutex": "cpp"
+    "mutex": "cpp",
+    "filesystem": "cpp"
   }
 }
