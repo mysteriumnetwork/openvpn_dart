@@ -40,6 +40,7 @@ namespace openvpn_dart
         void MonitorVPNStatus();
         std::string GetCurrentStatus();
         bool IsVPNRunning();
+        void CheckExistingConnection();
 
         // TAP driver management
         bool IsTAPDriverInstalled();

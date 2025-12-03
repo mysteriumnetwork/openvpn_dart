@@ -59,7 +59,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> initPlatformState() async {
     try {
-      await openVPNPlugin.connect(newConfig);
+      await openVPNPlugin.connect(config);
     } on Exception catch (e) {
       debugPrint("Error: $e");
     }
@@ -159,6 +159,41 @@ class _MyAppState extends State<MyApp> {
                   }
                 },
               ),
+              TextButton(
+                child: const Text("Show Logs"),
+                onPressed: () async {
+                  try {
+                    // Log path on Windows
+                    final logPath =
+                        '${Platform.environment['LOCALAPPDATA']}\\OpenVPNDart\\config\\openvpn.log';
+                    final logFile = File(logPath);
+                    if (await logFile.exists()) {
+                      final logs = await logFile.readAsString();
+                      debugPrint(
+                          "===== OpenVPN Logs =====\n$logs\n===== End Logs =====");
+                      // Show last 300 characters in snackbar
+                      final preview = logs.length > 300
+                          ? '...${logs.substring(logs.length - 300)}'
+                          : logs;
+                      _messangerKey.currentState?.showSnackBar(
+                        SnackBar(
+                          content: Text("Log preview:\n$preview"),
+                          duration: const Duration(seconds: 8),
+                        ),
+                      );
+                    } else {
+                      _messangerKey.currentState?.showSnackBar(
+                        SnackBar(
+                            content: Text("Log file not found at: $logPath")),
+                      );
+                    }
+                  } catch (e) {
+                    _messangerKey.currentState?.showSnackBar(
+                      SnackBar(content: Text("Error reading logs: $e")),
+                    );
+                  }
+                },
+              ),
               StreamBuilder<ConnectionStatus>(
                 initialData: ConnectionStatus.unknown,
                 stream: _statusStream,
@@ -183,68 +218,16 @@ String get config => '''
 client
 dev tun
 proto tcp
-remote 167.235.144.168 1194
+remote 88.99.85.196 1194
 nobind
 persist-key
 persist-tun
 remote-cert-tls server
 
 auth-user-pass inline
-cipher AES-256-CBC
+data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC:AES-128-CBC
 auth SHA256
-data-ciphers AES-256-CBC
-verb 6
-client-cert-not-required
-
-<ca>
------BEGIN CERTIFICATE-----
-MIIDXTCCAkWgAwIBAgIUeWpW3vmG6W8g/jtfRrzhZI9uwrgwDQYJKoZIhvcNAQEL
-BQAwHDEaMBgGA1UEAwwRc3VwZXJ2cG4tdGVzdG5ldDAwHhcNMjUwODA1MDMxNTI4
-WhcNMzUwODAzMDMxNTI4WjAcMRowGAYDVQQDDBFzdXBlcnZwbi10ZXN0bmV0MDCC
-ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKr0nAwWsVC8g7ByUhzYvY8r
-QpR1tFRQdyCoPRMsIA79J6kkrBGGYlmkA56I6lzhvEv3Od0dRzvrtnT03yzAyAmU
-EFojVUQjxH9yj0VWPJ+pDIfukSSQAQ83BAFvEhR/27M+6N26HEd8TgRMJtUN8l4M
-uH14CpI+cYeoqd2B/C3tatsG8xneUT3T/E8NNYeTXqETtmMXl9S7tqkGz2+2x5Ie
-dOJK+FTUxrqgHvsSR/nb23FnARvU6kB2jt18tPdnvWyMZ2zyY/dV2EzdYcATSWdr
-5zqSXY2xy+sh5tpeVak4QcNPJ8B6gjD/rQqAWAyT7IpCW48Qk1Mw98nFdXcPwVMC
-AwEAAaOBljCBkzAdBgNVHQ4EFgQUTgZYUZissmpM0Pt0A5uxKYmNbOIwVwYDVR0j
-BFAwToAUTgZYUZissmpM0Pt0A5uxKYmNbOKhIKQeMBwxGjAYBgNVBAMMEXN1cGVy
-dnBuLXRlc3RuZXQwghR5albe+YbpbyD+O19GvOFkj27CuDAMBgNVHRMEBTADAQH/
-MAsGA1UdDwQEAwIBBjANBgkqhkiG9w0BAQsFAAOCAQEAmNmvzg0pJl55QTTle+/f
-HiCArWs6atuXNPw7UGPPgZIg6El8wIUccXIv9TKKO0FWfg5MfvrBJW5MqKY5KAwj
-e39z8fJ6LjVUVW689jsgsQBC9ag1lKzQ2Hm0T4q/NTiiOTmrQzf5LskwxDqBViNb
-NhHx3EGsegMMSFu1vY5PLGhWuRUX9n6JhgoyBBW7fGdK6auE+JWbKKn6jIvFqvsu
-Og7Xucsfjn7W6POtN1k/Bi3jR+ui6Bd+Jy5L+wmOAS9J2MUOEBuVVJlu1OB4/sgY
-MLUM00xZpx1x2FBrIGLhanF7qAYi5W+FKWII6d3Wn7XFR/R8sx5p15c40F7Rr/xs
-vg==
------END CERTIFICATE-----
-</ca>
-
-<auth-user-pass>
-f059a4c3-761e-461f-b9fe-55bd7e10775b
-jWeLs7XqlDNUtlmKWom9pJkHz4NZAmju9alajf7XkIg
-</auth-user-pass>
-
-
-''';
-
-final String newConfig = '''
-client
-dev tun
-proto tcp
-remote 23.88.100.197 1194
-nobind
-persist-key
-persist-tun
-remote-cert-tls server
-
-client-cert-not-required
-auth-user-pass inline
-cipher AES-256-CBC
-auth SHA256
-data-ciphers AES-256-CBC
 verb 3
-
 <ca>
 -----BEGIN CERTIFICATE-----
 MIIDXTCCAkWgAwIBAgIUeWpW3vmG6W8g/jtfRrzhZI9uwrgwDQYJKoZIhvcNAQEL
@@ -268,9 +251,9 @@ MLUM00xZpx1x2FBrIGLhanF7qAYi5W+FKWII6d3Wn7XFR/R8sx5p15c40F7Rr/xs
 vg==
 -----END CERTIFICATE-----
 </ca>
-
 <auth-user-pass>
 b1c9af339f776072bbbfb4a1b526408808b0
 LjfEMsbBFFZfT5UkjO6czeIr64eJjpyGRCeqE3G97cg
 </auth-user-pass>
+
 ''';
