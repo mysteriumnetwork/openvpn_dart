@@ -48,14 +48,19 @@ target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(${PLUGIN_NAME} PRIVATE flutter flutter_wrapper_plugin)
 
+# Copy OpenVPN bundle to output directory after build
+add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+  "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle"
+  "$<TARGET_FILE_DIR:${PLUGIN_NAME}>/openvpn_bundle"
+  COMMENT "Copying OpenVPN bundle to output directory"
+)
 
 # List of absolute paths to libraries that should be bundled with the plugin.
 # This list could contain prebuilt libraries, or libraries created by an
 # external build triggered from this build file.
 set(openvpn_dart_bundled_libraries
-  "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/libpkcs11-helper-1.dll"
-  "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/openvpn.exe"
-  "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle/tap-windows-installer.exe"
+  ""
   PARENT_SCOPE
 )
 
@@ -91,20 +96,6 @@ apply_standard_settings(${TEST_RUNNER})
 target_include_directories(${TEST_RUNNER} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(${TEST_RUNNER} PRIVATE flutter_wrapper_plugin)
 target_link_libraries(${TEST_RUNNER} PRIVATE gtest_main gmock)
-
-# Copy OpenVPN bundle to output directory
-set(OPENVPN_BUNDLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/openvpn_bundle")
-
-# Install OpenVPN bundle with the plugin
-install(DIRECTORY "${OPENVPN_BUNDLE_DIR}/"
-        DESTINATION "${INSTALL_BUNDLE_LIB_DIR}/openvpn_bundle"
-        COMPONENT Runtime)
-
-# List of bundled libraries (empty, as OpenVPN is in a separate directory)
-set(openvpn_dart_bundled_libraries
-  ""
-  PARENT_SCOPE
-)
 
 
 # flutter_wrapper_plugin has link dependencies on the Flutter DLL.

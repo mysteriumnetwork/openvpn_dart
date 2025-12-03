@@ -23,24 +23,38 @@ class _MyAppState extends State<MyApp> {
   late Stream<ConnectionStatus> _statusStream;
 
   String? status;
+  String? initError;
+
   @override
   void initState() {
-    openVPNPlugin = OpenVPNDart();
-
-    openVPNPlugin.initialize(
-      providerBundleIdentifier:
-          Platform.isIOS
-              ? "com.mysteriumvpn.openvpnDartExample.VPNExtension"
-              : "com.mysteriumvpn.openvpnDartExample.VPNMExtension",
-      localizedDescription: "MYST Example OVPN",
-      lastStatus: (status) {
-        setState(() {
-          this.status = status.name;
-        });
-      },
-    );
-    _statusStream = openVPNPlugin.statusStream();
     super.initState();
+    openVPNPlugin = OpenVPNDart();
+    _statusStream = openVPNPlugin.statusStream();
+    _initializeVPN();
+  }
+
+  Future<void> _initializeVPN() async {
+    try {
+      await openVPNPlugin.initialize(
+        providerBundleIdentifier: Platform.isIOS
+            ? "com.mysteriumvpn.openvpnDartExample.VPNExtension"
+            : "com.mysteriumvpn.openvpnDartExample.VPNMExtension",
+        localizedDescription: "MYST Example OVPN",
+        lastStatus: (status) {
+          setState(() {
+            this.status = status.name;
+          });
+        },
+      );
+      setState(() {
+        initError = null;
+      });
+    } catch (e) {
+      setState(() {
+        initError = e.toString();
+      });
+      debugPrint("Initialization Error: $e");
+    }
   }
 
   Future<void> initPlatformState() async {
@@ -61,7 +75,17 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(status?.toString() ?? ConnectionStatus.disconnected.toString()),
+              if (initError != null)
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Text(
+                    'Init Error: $initError',
+                    style: const TextStyle(color: Colors.red),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              Text(status?.toString() ??
+                  ConnectionStatus.disconnected.toString()),
               TextButton(
                 child: const Text("Start"),
                 onPressed: () {
@@ -74,17 +98,18 @@ class _MyAppState extends State<MyApp> {
                   openVPNPlugin.disconnect();
                 },
               ),
-
               TextButton(
                 child: const Text("Check Tunnel"),
                 onPressed: () async {
                   try {
-                    bool exists = await openVPNPlugin.checkTunnelConfiguration();
+                    bool exists =
+                        await openVPNPlugin.checkTunnelConfiguration();
                     _messangerKey.currentState?.showSnackBar(
                       SnackBar(content: Text("Tunnel exists: $exists")),
                     );
                   } catch (e) {
-                    _messangerKey.currentState?.showSnackBar(SnackBar(content: Text("Error: $e")));
+                    _messangerKey.currentState
+                        ?.showSnackBar(SnackBar(content: Text("Error: $e")));
                   }
                 },
               ),
@@ -124,7 +149,8 @@ class _MyAppState extends State<MyApp> {
                   try {
                     final status = await openVPNPlugin.getVPNStatus();
                     _messangerKey.currentState?.showSnackBar(
-                      SnackBar(content: Text("Tunnel status retrieved: $status")),
+                      SnackBar(
+                          content: Text("Tunnel status retrieved: $status")),
                     );
                   } catch (e) {
                     _messangerKey.currentState?.showSnackBar(
@@ -133,11 +159,11 @@ class _MyAppState extends State<MyApp> {
                   }
                 },
               ),
-
               StreamBuilder<ConnectionStatus>(
                 initialData: ConnectionStatus.unknown,
                 stream: _statusStream,
-                builder: (BuildContext context, AsyncSnapshot<ConnectionStatus> snapshot) {
+                builder: (BuildContext context,
+                    AsyncSnapshot<ConnectionStatus> snapshot) {
                   // Check if the snapshot has data and is a map containing the 'status' key
                   if (snapshot.hasData) {
                     return Text("Tunnel stream status: ${snapshot.data!.name}");

@@ -72,8 +72,10 @@ namespace openvpn_dart
     bundled_path_ = GetPluginDataPath();
     openvpn_executable_path_ = bundled_path_ + "\\openvpn.exe";
 
-    // Extract bundled OpenVPN on first run
-    if (!std::filesystem::exists(openvpn_executable_path_))
+    // Extract bundled OpenVPN on first run or if files are missing
+    std::string tap_installer = bundled_path_ + "\\tap-windows-installer.exe";
+    if (!std::filesystem::exists(openvpn_executable_path_) ||
+        !std::filesystem::exists(tap_installer))
     {
       ExtractBundledOpenVPN();
     }
@@ -146,7 +148,15 @@ namespace openvpn_dart
     GetModuleFileNameA(hModule, path, MAX_PATH);
 
     std::filesystem::path dll_path(path);
-    return dll_path.parent_path().string() + "\\openvpn_bundle";
+    std::string bundle_subdir = dll_path.parent_path().string() + "\\openvpn_bundle";
+    std::string dll_dir = dll_path.parent_path().string();
+
+    // Check if openvpn_bundle subdirectory exists, otherwise use DLL directory
+    if (std::filesystem::exists(bundle_subdir))
+    {
+      return bundle_subdir;
+    }
+    return dll_dir;
   }
 
   bool OpenVpnDartPlugin::ExtractBundledOpenVPN()
@@ -156,12 +166,17 @@ namespace openvpn_dart
       std::string source = GetBundledOpenVPNPath();
       std::string dest = bundled_path_;
 
+      OutputDebugStringA(("Extracting from: " + source).c_str());
+      OutputDebugStringA(("Extracting to: " + dest).c_str());
+
       if (!std::filesystem::exists(source))
       {
+        OutputDebugStringA("Source bundle not found!");
         return false; // Bundle not found
       }
 
       // Copy all files from bundle to destination
+      int file_count = 0;
       for (const auto &entry : std::filesystem::recursive_directory_iterator(source))
       {
         if (entry.is_regular_file())
@@ -172,9 +187,12 @@ namespace openvpn_dart
           std::filesystem::create_directories(dest_file.parent_path());
           std::filesystem::copy_file(entry.path(), dest_file,
                                      std::filesystem::copy_options::overwrite_existing);
+          file_count++;
+          OutputDebugStringA(("Copied: " + dest_file.string()).c_str());
         }
       }
 
+      OutputDebugStringA(("Extracted " + std::to_string(file_count) + " files").c_str());
       return true;
     }
     catch (const std::exception &)
@@ -310,16 +328,37 @@ namespace openvpn_dart
 
     if (method == "initialize")
     {
-      // Check if TAP driver is installed
-      if (!IsTAPDriverInstalled())
+      std::string error_details = "";
+      bool tap_installed = IsTAPDriverInstalled();
+
+      if (!tap_installed)
       {
+        std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
+        error_details += "TAP driver not found. ";
+        error_details += "Installer path: " + installer_path + " ";
+        error_details += std::filesystem::exists(installer_path) ? "(exists) " : "(missing) ";
+        error_details += "Bundled path: " + bundled_path_ + " ";
+
         // Try to install it
-        if (!InstallTAPDriver())
+        if (std::filesystem::exists(installer_path))
         {
-          result->Error("TAP_DRIVER_MISSING",
-                        "TAP driver not installed and auto-install failed. Please run as administrator.");
-          return;
+          if (!InstallTAPDriver())
+          {
+            error_details += "Auto-install failed. ";
+          }
+          else
+          {
+            tap_installed = true;
+          }
         }
+      }
+
+      if (!tap_installed)
+      {
+        result->Error("TAP_DRIVER_MISSING",
+                      "TAP driver required but not available. " + error_details +
+                          "Please install TAP-Windows manually or ensure app runs with admin rights.");
+        return;
       }
 
       // Verify OpenVPN executable exists
@@ -328,7 +367,7 @@ namespace openvpn_dart
         if (!ExtractBundledOpenVPN())
         {
           result->Error("OPENVPN_NOT_FOUND",
-                        "Failed to extract bundled OpenVPN");
+                        "Failed to extract bundled OpenVPN from: " + GetBundledOpenVPNPath());
           return;
         }
       }
@@ -386,7 +425,10 @@ namespace openvpn_dart
     }
     else if (method == "checkTunnelConfiguration")
     {
-      result->Success(flutter::EncodableValue(IsVPNRunning()));
+      // On Windows, check if OpenVPN executable and TAP driver are available
+      bool configured = std::filesystem::exists(openvpn_executable_path_) &&
+                        IsTAPDriverInstalled();
+      result->Success(flutter::EncodableValue(configured));
     }
     else if (method == "removeTunnelConfiguration")
     {
@@ -395,7 +437,20 @@ namespace openvpn_dart
     }
     else if (method == "setupTunnel")
     {
-      result->Success(flutter::EncodableValue(true));
+      // On Windows, ensure OpenVPN is extracted and TAP driver is installed
+      bool setup_success = true;
+
+      if (!std::filesystem::exists(openvpn_executable_path_))
+      {
+        setup_success = ExtractBundledOpenVPN();
+      }
+
+      if (setup_success && !IsTAPDriverInstalled())
+      {
+        setup_success = InstallTAPDriver();
+      }
+
+      result->Success(flutter::EncodableValue(setup_success));
     }
     else
     {
