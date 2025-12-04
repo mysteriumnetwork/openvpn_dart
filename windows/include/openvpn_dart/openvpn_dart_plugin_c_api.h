@@ -10,14 +10,15 @@
 #endif
 
 #if defined(__cplusplus)
-extern "C" {
+extern "C"
+{
 #endif
 
-FLUTTER_PLUGIN_EXPORT void OpenvpnDartPluginCApiRegisterWithRegistrar(
-    FlutterDesktopPluginRegistrarRef registrar);
+    FLUTTER_PLUGIN_EXPORT void OpenvpnDartPluginCApiRegisterWithRegistrar(
+        FlutterDesktopPluginRegistrarRef registrar);
 
 #if defined(__cplusplus)
-}  // extern "C"
+} // extern "C"
 #endif
 
-#endif  // FLUTTER_PLUGIN_OPENVPN_DART_PLUGIN_C_API_H_
+#endif // FLUTTER_PLUGIN_OPENVPN_DART_PLUGIN_C_API_H_

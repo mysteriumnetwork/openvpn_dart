@@ -1,3 +1,9 @@
 {
-  "dart.flutterSdkPath": ".fvm/versions/3.35.3"
+  "dart.flutterSdkPath": ".fvm/versions/3.35.3",
+  "files.associations": {
+    "*.yaml": "yaml",
+    "xstring": "cpp",
+    "mutex": "cpp",
+    "filesystem": "cpp"
+  }
 }

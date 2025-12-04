@@ -10,34 +10,38 @@
 
 #include "openvpn_dart_plugin.h"
 
-namespace openvpn_dart {
-namespace test {
+namespace openvpn_dart
+{
+  namespace test
+  {
 
-namespace {
+    namespace
+    {
 
-using flutter::EncodableMap;
-using flutter::EncodableValue;
-using flutter::MethodCall;
-using flutter::MethodResultFunctions;
+      using flutter::EncodableMap;
+      using flutter::EncodableValue;
+      using flutter::MethodCall;
+      using flutter::MethodResultFunctions;
 
-}  // namespace
+    } // namespace
 
-TEST(OpenvpnDartPlugin, GetPlatformVersion) {
-  OpenvpnDartPlugin plugin;
-  // Save the reply value from the success callback.
-  std::string result_string;
-  plugin.HandleMethodCall(
-      MethodCall("getPlatformVersion", std::make_unique<EncodableValue>()),
-      std::make_unique<MethodResultFunctions<>>(
-          [&result_string](const EncodableValue* result) {
-            result_string = std::get<std::string>(*result);
-          },
-          nullptr, nullptr));
+    TEST(OpenVpnDartPlugin, GetStatus)
+    {
+      OpenVpnDartPlugin plugin(nullptr);
+      // Save the reply value from the success callback.
+      std::string result_string;
+      plugin.HandleMethodCall(
+          MethodCall("status", std::make_unique<EncodableValue>()),
+          std::make_unique<MethodResultFunctions<>>(
+              [&result_string](const EncodableValue *result)
+              {
+                result_string = std::get<std::string>(*result);
+              },
+              nullptr, nullptr));
 
-  // Since the exact string varies by host, just ensure that it's a string
-  // with the expected format.
-  EXPECT_TRUE(result_string.rfind("Windows ", 0) == 0);
-}
+      // Should return initial status
+      EXPECT_EQ(result_string, "disconnected");
+    }
 
-}  // namespace test
-}  // namespace openvpn_dart
+  } // namespace test
+} // namespace openvpn_dart
