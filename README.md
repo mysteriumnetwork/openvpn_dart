@@ -33,11 +33,30 @@ A Flutter plugin for OpenVPN connectivity with built-in Windows support. Connect
 
 ## Installation
 
+Since this package is not yet published on pub.dev, you need to import it directly from GitHub.
+
+### From GitHub (Latest Version)
+
 Add this to your package's `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  openvpn_dart: ^1.0.0
+  openvpn_dart:
+    git:
+      url: https://github.com/mysteriumnetwork/openvpn_dart.git
+      ref: master  # or specify a specific branch/tag
+```
+
+### From GitHub (Specific Release)
+
+To use a specific release version:
+
+```yaml
+dependencies:
+  openvpn_dart:
+    git:
+      url: https://github.com/mysteriumnetwork/openvpn_dart.git
+      ref: v1.0.0  # replace with desired version tag
 ```
 
 Then run:
@@ -543,9 +562,9 @@ Contributions are welcome! Please:
 
 ## Support
 
-- 📖 [Documentation](https://github.com/yourname/openvpn_dart/wiki)
-- 🐛 [Issue Tracker](https://github.com/yourname/openvpn_dart/issues)
-- 💬 [Discussions](https://github.com/yourname/openvpn_dart/discussions)
+- 📖 [Documentation](https://github.com/mysteriumnetwork/openvpn_dart/wiki)
+- 🐛 [Issue Tracker](https://github.com/mysteriumnetwork/openvpn_dart/issues)
+- 💬 [Discussions](https://github.com/mysteriumnetwork/openvpn_dart/discussions)
 
 ## Acknowledgments
 
