@@ -498,10 +498,6 @@ _vpn.statusStream().listen((status) async {
 
 Project license: [MIT](LICENSE).
 
-Bundled third-party components (e.g., OpenVPN Community Edition under GPLv2) remain under their own
-licenses. If you redistribute those binaries or sources, comply with their terms (include their
-license, provide attribution/source, etc.).
-
 ## Contributing
 
 Contributions are welcome! Please:
