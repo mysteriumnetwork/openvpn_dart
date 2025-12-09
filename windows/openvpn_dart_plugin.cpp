@@ -274,6 +274,14 @@ namespace openvpn_dart
 
   bool OpenVpnDartPlugin::IsTAPDriverInstalled()
   {
+    // On Windows 11, DCO may be preferred over TAP
+    if (IsWindows11OrGreater() && SupportsDCO())
+    {
+      // DCO is built into Windows kernel, no separate driver needed
+      OutputDebugStringA("Using DCO driver (built-in for Windows 11)");
+      return true;
+    }
+
     // Check if TAP adapter exists in network adapters
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
@@ -347,6 +355,143 @@ namespace openvpn_dart
     return IsTAPDriverInstalled();
   }
 
+  bool OpenVpnDartPlugin::IsWindows11OrGreater()
+  {
+    typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtDll)
+    {
+      RtlGetVersionPtr RtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hNtDll, "RtlGetVersion");
+      if (RtlGetVersion)
+      {
+        RTL_OSVERSIONINFOW osInfo = {sizeof(osInfo)};
+        if (RtlGetVersion(&osInfo) == 0)
+        {
+          // Windows 11 is version 10.0 build 22000+
+          bool isWin11 = (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber >= 22000) ||
+                         osInfo.dwMajorVersion > 10;
+          if (isWin11)
+          {
+            OutputDebugStringA(("Detected Windows 11 or greater (Build: " + std::to_string(osInfo.dwBuildNumber) + ")").c_str());
+          }
+          return isWin11;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool OpenVpnDartPlugin::SupportsDCO()
+  {
+    // Check if openvpn.exe supports DCO (Data Channel Offload)
+    // DCO is built into OpenVPN 2.6+ on Windows
+    std::string test_cmd = "\"" + openvpn_executable_path_ + "\" --show-dco";
+
+    SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
+    HANDLE read_pipe, write_pipe;
+
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0))
+    {
+      return false;
+    }
+
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = write_pipe;
+    si.hStdError = write_pipe;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi = {0};
+
+    BOOL success = CreateProcessA(
+        nullptr,
+        const_cast<char *>(test_cmd.c_str()),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &si,
+        &pi);
+
+    CloseHandle(write_pipe);
+
+    if (!success)
+    {
+      CloseHandle(read_pipe);
+      return false;
+    }
+
+    // Read output
+    char buffer[4096];
+    DWORD bytes_read;
+    std::string output;
+
+    while (ReadFile(read_pipe, buffer, sizeof(buffer) - 1, &bytes_read, nullptr) && bytes_read > 0)
+    {
+      buffer[bytes_read] = '\0';
+      output += buffer;
+    }
+
+    WaitForSingleObject(pi.hProcess, 5000);
+    CloseHandle(read_pipe);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    // Check if DCO is mentioned in output
+    bool hasDCO = output.find("ovpn-dco") != std::string::npos ||
+                  output.find("dco-win") != std::string::npos;
+
+    if (hasDCO)
+    {
+      OutputDebugStringA("DCO (Data Channel Offload) driver is supported");
+    }
+    else
+    {
+      OutputDebugStringA("DCO driver is NOT supported, will use TAP");
+    }
+
+    return hasDCO;
+  }
+
+  std::string OpenVpnDartPlugin::CheckSecurityFeatures()
+  {
+    std::string warnings;
+
+    if (!IsWindows11OrGreater())
+    {
+      return warnings;
+    }
+
+    // Check if running as Administrator
+    BOOL isAdmin = FALSE;
+    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+    PSID AdministratorsGroup;
+
+    if (AllocateAndInitializeSid(&NtAuthority, 2,
+                                 SECURITY_BUILTIN_DOMAIN_RID,
+                                 DOMAIN_ALIAS_RID_ADMINS,
+                                 0, 0, 0, 0, 0, 0,
+                                 &AdministratorsGroup))
+    {
+      CheckTokenMembership(NULL, AdministratorsGroup, &isAdmin);
+      FreeSid(AdministratorsGroup);
+    }
+
+    if (!isAdmin)
+    {
+      warnings += "Not running as Administrator. ";
+    }
+
+    warnings += "Windows 11 detected. If connection fails, check Windows Security: ";
+    warnings += "Settings > Privacy & Security > Windows Security > Device Security > Core isolation. ";
+    warnings += "Try disabling 'Memory integrity' if issues persist.";
+
+    return warnings;
+  }
+
   std::string OpenVpnDartPlugin::GetTAPAdapterName()
   {
     // Get the name of the TAP adapter
@@ -399,6 +544,36 @@ namespace openvpn_dart
 
     if (method == "initialize")
     {
+      OutputDebugStringA("=== OpenVPN Initialization Starting ===");
+
+      // Log Windows version
+      if (IsWindows11OrGreater())
+      {
+        OutputDebugStringA("Detected: Windows 11 or greater");
+        std::string secWarnings = CheckSecurityFeatures();
+        if (!secWarnings.empty())
+        {
+          OutputDebugStringA(("Security warnings: " + secWarnings).c_str());
+        }
+      }
+      else
+      {
+        OutputDebugStringA("Detected: Windows 10 or earlier");
+      }
+
+      // Log DCO support
+      if (std::filesystem::exists(openvpn_executable_path_))
+      {
+        if (SupportsDCO())
+        {
+          OutputDebugStringA("DCO (Data Channel Offload) is available");
+        }
+        else
+        {
+          OutputDebugStringA("DCO not available, will use TAP driver");
+        }
+      }
+
       std::string error_details = "";
       bool tap_installed = IsTAPDriverInstalled();
 
@@ -679,9 +854,21 @@ namespace openvpn_dart
     command_line += " --config \"" + config_file_path_ + "\"";
     command_line += " --log \"" + log_file_path_ + "\"";
     command_line += " --verb 3";
-    command_line += " --route-method exe";            // Use external routing method for Windows
-    command_line += " --route-delay 2";               // Give Windows time to set up routes
-    command_line += " --windows-driver tap-windows6"; // Use TAP-Windows6 driver
+    command_line += " --route-method exe"; // Use external routing method for Windows
+    command_line += " --route-delay 2";    // Give Windows time to set up routes
+
+    // Use DCO (Data Channel Offload) on Windows 11 for better compatibility
+    // Otherwise fall back to TAP-Windows6 driver
+    if (IsWindows11OrGreater() && SupportsDCO())
+    {
+      command_line += " --windows-driver ovpn-dco";
+      OutputDebugStringA("Using DCO (Data Channel Offload) driver for Windows 11");
+    }
+    else
+    {
+      command_line += " --windows-driver tap-windows6";
+      OutputDebugStringA("Using TAP-Windows6 driver");
+    }
 
     OutputDebugStringA(("Starting OpenVPN with command: " + command_line).c_str());
     OutputDebugStringA(("Log file path: " + log_file_path_).c_str());
@@ -713,14 +900,37 @@ namespace openvpn_dart
     {
       DWORD error = GetLastError();
       std::string error_msg = "Failed to start OpenVPN. Error code: " + std::to_string(error);
-      if (error == 740)
+
+      // Add Windows 11 specific hints
+      if (IsWindows11OrGreater())
       {
-        error_msg += " (Elevation required)";
+        error_msg += " [Windows 11 detected]";
       }
-      else if (error == 2)
+
+      // More detailed error codes
+      switch (error)
       {
-        error_msg += " (File not found: " + openvpn_executable_path_ + ")";
+      case 740:
+        error_msg += " (ERROR_ELEVATION_REQUIRED: Please run the app as Administrator)";
+        break;
+      case 5:
+        error_msg += " (ERROR_ACCESS_DENIED: Security policy may be blocking OpenVPN)";
+        if (IsWindows11OrGreater())
+        {
+          error_msg += ". Try disabling Memory Integrity in Windows Security settings";
+        }
+        break;
+      case 2:
+        error_msg += " (ERROR_FILE_NOT_FOUND: " + openvpn_executable_path_ + ")";
+        break;
+      case 193:
+        error_msg += " (ERROR_BAD_EXE_FORMAT: Architecture mismatch or corrupt executable)";
+        break;
+      case 1450:
+        error_msg += " (ERROR_NO_SYSTEM_RESOURCES: Insufficient system resources)";
+        break;
       }
+
       OutputDebugStringA(error_msg.c_str());
       CloseHandle(pipe_read_);
       CloseHandle(pipe_write_);
