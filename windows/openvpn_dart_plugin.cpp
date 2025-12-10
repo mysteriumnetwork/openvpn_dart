@@ -6,12 +6,18 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <tlhelp32.h>
 #include <memory>
 #include <sstream>
 #include <fstream>
 #include <filesystem>
 #include <regex>
+
+// Windows error code constants
+#ifndef ERROR_CANCELLED
+#define ERROR_CANCELLED 1223L
+#endif
 
 namespace openvpn_dart
 {
@@ -330,8 +336,12 @@ namespace openvpn_dart
 
     if (!std::filesystem::exists(installer_path))
     {
+      OutputDebugStringA(("TAP installer not found at: " + installer_path).c_str());
       return false;
     }
+
+    OutputDebugStringA("Attempting to install TAP-Windows driver...");
+    OutputDebugStringA("NOTE: This requires administrator privileges (UAC prompt will appear)");
 
     SHELLEXECUTEINFOA sei = {0};
     sei.cbSize = sizeof(sei);
@@ -343,16 +353,67 @@ namespace openvpn_dart
 
     if (!ShellExecuteExA(&sei))
     {
+      DWORD error = GetLastError();
+      std::string errorMsg = "Failed to launch TAP installer. Error: " + std::to_string(error);
+
+      if (error == ERROR_CANCELLED || error == 1223)
+      {
+        errorMsg += " (User cancelled UAC prompt)";
+      }
+      else if (error == ERROR_ACCESS_DENIED)
+      {
+        errorMsg += " (Access denied - administrator rights required)";
+      }
+
+      OutputDebugStringA(errorMsg.c_str());
       return false;
     }
 
     if (sei.hProcess)
     {
-      WaitForSingleObject(sei.hProcess, INFINITE);
+      OutputDebugStringA("Waiting for TAP driver installation to complete...");
+      DWORD waitResult = WaitForSingleObject(sei.hProcess, 60000); // 60 second timeout
+
+      if (waitResult == WAIT_TIMEOUT)
+      {
+        OutputDebugStringA("TAP driver installation timed out");
+        CloseHandle(sei.hProcess);
+        return false;
+      }
+
+      // Check exit code
+      DWORD exitCode = 0;
+      GetExitCodeProcess(sei.hProcess, &exitCode);
       CloseHandle(sei.hProcess);
+
+      if (exitCode != 0)
+      {
+        OutputDebugStringA(("TAP installer exited with code: " + std::to_string(exitCode)).c_str());
+        // Exit code 0 = success, non-zero = failure
+        if (exitCode == 1)
+        {
+          OutputDebugStringA("Installation failed - may be blocked by Windows security");
+        }
+        return false;
+      }
+
+      OutputDebugStringA("TAP driver installation completed successfully");
     }
 
-    return IsTAPDriverInstalled();
+    // Give Windows a moment to register the driver
+    Sleep(2000);
+
+    bool installed = IsTAPDriverInstalled();
+    if (installed)
+    {
+      OutputDebugStringA("TAP driver verified: Successfully installed and detected");
+    }
+    else
+    {
+      OutputDebugStringA("TAP driver installation completed but driver not detected in registry");
+    }
+
+    return installed;
   }
 
   bool OpenVpnDartPlugin::IsWindows11OrGreater()
@@ -477,6 +538,55 @@ namespace openvpn_dart
     return false;
   }
 
+  void OpenVpnDartPlugin::EnsureTAPDriver()
+  {
+    OutputDebugStringA("=== Checking TAP Driver ===");
+
+    if (IsTAPDriverInstalled())
+    {
+      OutputDebugStringA("TAP driver is already installed");
+      return;
+    }
+
+    std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
+
+    if (!std::filesystem::exists(installer_path))
+    {
+      throw std::runtime_error("TAP installer not found in bundle: " + installer_path);
+    }
+
+    OutputDebugStringA("TAP driver not found. Starting installation...");
+
+    if (!InstallTAPDriver())
+    {
+      std::string error_msg = "Failed to install TAP driver.";
+
+      if (IsWindows11OrGreater())
+      {
+        error_msg += "\n\nWindows 11 detected. To install the driver:\n";
+        error_msg += "1. Run this application as Administrator, OR\n";
+        error_msg += "2. Temporarily disable Memory Integrity:\n";
+        error_msg += "   Settings > Privacy & Security > Windows Security > ";
+        error_msg += "   Device Security > Core isolation > Memory integrity (turn OFF)\n";
+        error_msg += "   Then restart the app and try again.";
+      }
+      else
+      {
+        error_msg += " Please run the application as Administrator and try again.";
+      }
+
+      throw std::runtime_error(error_msg);
+    }
+
+    // Verify installation succeeded
+    if (!IsTAPDriverInstalled())
+    {
+      throw std::runtime_error("TAP driver installation completed but driver not detected. Please restart your computer and try again.");
+    }
+
+    OutputDebugStringA("TAP driver installed successfully");
+  }
+
   std::string OpenVpnDartPlugin::CheckSecurityFeatures()
   {
     std::string warnings;
@@ -563,7 +673,19 @@ namespace openvpn_dart
 
     const std::string &method = method_call.method_name();
 
-    if (method == "initialize")
+    if (method == "ensureTapDriver")
+    {
+      try
+      {
+        EnsureTAPDriver();
+        result->Success(flutter::EncodableValue(true));
+      }
+      catch (const std::exception &e)
+      {
+        result->Error("TAP_DRIVER_ERROR", e.what());
+      }
+    }
+    else if (method == "initialize")
     {
       OutputDebugStringA("=== OpenVPN Initialization Starting ===");
 
@@ -595,36 +717,34 @@ namespace openvpn_dart
         }
       }
 
-      std::string error_details = "";
+      // Just check if TAP driver is installed, don't auto-install
       bool tap_installed = IsTAPDriverInstalled();
 
       if (!tap_installed)
       {
-        std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
-        error_details += "TAP driver not found. ";
-        error_details += "Installer path: " + installer_path + " ";
-        error_details += std::filesystem::exists(installer_path) ? "(exists) " : "(missing) ";
-        error_details += "Bundled path: " + bundled_path_ + " ";
+        std::string user_message = "TAP-Windows network driver is required but not installed.\n\n";
+        user_message += "Please call 'ensureTapDriver()' method to install the driver.\n\n";
 
-        // Try to install it
-        if (std::filesystem::exists(installer_path))
+        if (IsWindows11OrGreater())
         {
-          if (!InstallTAPDriver())
-          {
-            error_details += "Auto-install failed. ";
-          }
-          else
-          {
-            tap_installed = true;
-          }
+          user_message += "Windows 11 Note: You may need to run as Administrator.\n";
+          user_message += "If installation fails:\n";
+          user_message += "1. Run this application as Administrator, OR\n";
+          user_message += "2. Disable Memory Integrity in Windows Security:\n";
+          user_message += "   Settings > Privacy & Security > Windows Security > Device Security > Core isolation\n";
+          user_message += "   Turn OFF 'Memory integrity', then restart your computer.\n\n";
         }
-      }
+        else
+        {
+          user_message += "Please try one of these solutions:\n";
+          user_message += "1. Run this application as Administrator\n";
+          user_message += "2. Install TAP-Windows manually from: https://openvpn.net/community-downloads/\n\n";
+        }
 
-      if (!tap_installed)
-      {
-        result->Error("TAP_DRIVER_MISSING",
-                      "TAP driver required but not available. " + error_details +
-                          "Please install TAP-Windows manually or ensure app runs with admin rights.");
+        user_message += "Technical details: " + error_details;
+
+        OutputDebugStringA(("Initialization failed: " + user_message).c_str());
+        result->Error("TAP_DRIVER_REQUIRED", user_message);
         return;
       }
 

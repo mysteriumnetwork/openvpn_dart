@@ -33,6 +33,26 @@ class _MyAppState extends State<MyApp> {
     _initializeVPN();
   }
 
+  Future<void> _ensureTapDriver() async {
+    try {
+      setState(() {
+        status = "Installing TAP driver...";
+      });
+      await openVPNPlugin.ensureTapDriver();
+      _showSnackBar("TAP driver is ready");
+      setState(() {
+        status = "TAP driver ready";
+      });
+    } catch (e, stackTrace) {
+      final errorMsg = e.toString();
+      debugPrint("TAP Driver Error: $errorMsg\nStack trace: $stackTrace");
+      _showSnackBar("TAP driver error: $errorMsg", isError: true);
+      setState(() {
+        status = "TAP driver error";
+      });
+    }
+  }
+
   void _showSnackBar(String message, {bool isError = false}) {
     _messangerKey.currentState?.clearSnackBars();
     _messangerKey.currentState?.showSnackBar(
@@ -100,7 +120,14 @@ class _MyAppState extends State<MyApp> {
                     textAlign: TextAlign.center,
                   ),
                 ),
-              Text(status?.toString() ?? ConnectionStatus.disconnected.toString()),
+              Text(status?.toString() ??
+                  ConnectionStatus.disconnected.toString()),
+              TextButton(
+                child: const Text("Install TAP Driver"),
+                onPressed: () {
+                  _ensureTapDriver();
+                },
+              ),
               TextButton(
                 child: const Text("Start"),
                 onPressed: () {
@@ -114,7 +141,8 @@ class _MyAppState extends State<MyApp> {
                     openVPNPlugin.disconnect();
                     _showSnackBar("VPN disconnection requested");
                   } catch (e, stackTrace) {
-                    debugPrint("Disconnect Error: $e\nStack trace: $stackTrace");
+                    debugPrint(
+                        "Disconnect Error: $e\nStack trace: $stackTrace");
                     _showSnackBar("Failed to disconnect: $e", isError: true);
                   }
                 },
@@ -123,10 +151,12 @@ class _MyAppState extends State<MyApp> {
                 child: const Text("Check Tunnel"),
                 onPressed: () async {
                   try {
-                    final exists = await openVPNPlugin.checkTunnelConfiguration();
+                    final exists =
+                        await openVPNPlugin.checkTunnelConfiguration();
                     _showSnackBar("Tunnel exists: $exists");
                   } catch (e, stackTrace) {
-                    debugPrint("Check Tunnel Error: $e\nStack trace: $stackTrace");
+                    debugPrint(
+                        "Check Tunnel Error: $e\nStack trace: $stackTrace");
                     _showSnackBar("Failed to check tunnel: $e", isError: true);
                   }
                 },
@@ -138,7 +168,8 @@ class _MyAppState extends State<MyApp> {
                     await openVPNPlugin.setupTunnel();
                     _showSnackBar("Tunnel setup succeeded");
                   } catch (e, stackTrace) {
-                    debugPrint("Setup Tunnel Error: $e\nStack trace: $stackTrace");
+                    debugPrint(
+                        "Setup Tunnel Error: $e\nStack trace: $stackTrace");
                     _showSnackBar("Setup failed: $e", isError: true);
                   }
                 },
@@ -150,7 +181,8 @@ class _MyAppState extends State<MyApp> {
                     await openVPNPlugin.removeTunnelConfiguration();
                     _showSnackBar("Tunnel removed successfully");
                   } catch (e, stackTrace) {
-                    debugPrint("Remove Tunnel Error: $e\nStack trace: $stackTrace");
+                    debugPrint(
+                        "Remove Tunnel Error: $e\nStack trace: $stackTrace");
                     _showSnackBar("Remove failed: $e", isError: true);
                   }
                 },
@@ -162,7 +194,8 @@ class _MyAppState extends State<MyApp> {
                     final status = await openVPNPlugin.getVPNStatus();
                     _showSnackBar("Current status: ${status.name}");
                   } catch (e, stackTrace) {
-                    debugPrint("Get Status Error: $e\nStack trace: $stackTrace");
+                    debugPrint(
+                        "Get Status Error: $e\nStack trace: $stackTrace");
                     _showSnackBar("Failed to get status: $e", isError: true);
                   }
                 },
@@ -172,21 +205,48 @@ class _MyAppState extends State<MyApp> {
                 onPressed: () async {
                   try {
                     if (!Platform.isWindows) {
-                      _showSnackBar("Logs only available on Windows", isError: true);
+                      _showSnackBar("Logs only available on Windows",
+                          isError: true);
                       return;
                     }
 
+                    final localAppData = Platform.environment['LOCALAPPDATA'];
+                    if (localAppData == null || localAppData.isEmpty) {
+                      _showSnackBar(
+                          "LOCALAPPDATA environment variable not found",
+                          isError: true);
+                      return;
+                    }
+
+                    final baseDir = Directory('$localAppData\\OpenVPNDart');
+                    final configDir =
+                        Directory('$localAppData\\OpenVPNDart\\config');
                     final logPath =
-                        '${Platform.environment['LOCALAPPDATA']}\\OpenVPNDart\\config\\openvpn.log';
+                        '$localAppData\\OpenVPNDart\\config\\openvpn.log';
                     final logFile = File(logPath);
+
+                    // Debug info
+                    debugPrint("LOCALAPPDATA: $localAppData");
+                    debugPrint("Base dir exists: ${await baseDir.exists()}");
+                    debugPrint(
+                        "Config dir exists: ${await configDir.exists()}");
+                    debugPrint("Log file exists: ${await logFile.exists()}");
+
+                    if (await baseDir.exists()) {
+                      final files = await baseDir.list().toList();
+                      debugPrint(
+                          "Files in OpenVPNDart: ${files.map((f) => f.path).join(', ')}");
+                    }
 
                     if (await logFile.exists()) {
                       final logs = await logFile.readAsString();
-                      debugPrint("===== OpenVPN Logs =====\n$logs\n===== End Logs =====");
+                      debugPrint(
+                          "===== OpenVPN Logs =====\n$logs\n===== End Logs =====");
 
                       // Show last 300 characters in snackbar
-                      final preview =
-                          logs.length > 300 ? '...${logs.substring(logs.length - 300)}' : logs;
+                      final preview = logs.length > 300
+                          ? '...${logs.substring(logs.length - 300)}'
+                          : logs;
                       _messangerKey.currentState?.clearSnackBars();
                       _messangerKey.currentState?.showSnackBar(
                         SnackBar(
@@ -195,7 +255,12 @@ class _MyAppState extends State<MyApp> {
                         ),
                       );
                     } else {
-                      _showSnackBar("Log file not found at: $logPath", isError: true);
+                      final msg = "Log file not found. "
+                          "Base dir exists: ${await baseDir.exists()}, "
+                          "Config dir exists: ${await configDir.exists()}. "
+                          "Path: $logPath";
+                      _showSnackBar(msg, isError: true);
+                      debugPrint(msg);
                     }
                   } catch (e, stackTrace) {
                     debugPrint("Show Logs Error: $e\nStack trace: $stackTrace");
@@ -206,7 +271,8 @@ class _MyAppState extends State<MyApp> {
               StreamBuilder<ConnectionStatus>(
                 initialData: ConnectionStatus.unknown,
                 stream: _statusStream,
-                builder: (BuildContext context, AsyncSnapshot<ConnectionStatus> snapshot) {
+                builder: (BuildContext context,
+                    AsyncSnapshot<ConnectionStatus> snapshot) {
                   // Check if the snapshot has data and is a map containing the 'status' key
                   if (snapshot.hasData) {
                     return Text("Tunnel stream status: ${snapshot.data!.name}");

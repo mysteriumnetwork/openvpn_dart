@@ -6,17 +6,22 @@ import 'package:openvpn_dart/vpn_status.dart';
 
 class OpenVPNDart {
   ///Channel's names of _VPNStatusSnapshot
-  static const String _eventChannelVPNStatus = "id.mysteriumvpn.openvpn_flutter/vpnstatus";
+  static const String _eventChannelVPNStatus =
+      "id.mysteriumvpn.openvpn_flutter/vpnstatus";
 
   ///Channel's names of _channelControl
-  static const String _methodChannelVpnControl = "id.mysteriumvpn.openvpn_flutter/vpncontrol";
+  static const String _methodChannelVpnControl =
+      "id.mysteriumvpn.openvpn_flutter/vpncontrol";
 
   ///Method channel to invoke methods from native side
-  static const MethodChannel _channelControl = MethodChannel(_methodChannelVpnControl);
+  static const MethodChannel _channelControl =
+      MethodChannel(_methodChannelVpnControl);
 
   ///Snapshot of stream that produced by native side
   static Stream<String> _vpnStatusSnapshot() =>
-      const EventChannel(_eventChannelVPNStatus).receiveBroadcastStream().cast();
+      const EventChannel(_eventChannelVPNStatus)
+          .receiveBroadcastStream()
+          .cast();
 
   ///To indicate the engine already initialize
   bool initialized = false;
@@ -24,6 +29,25 @@ class OpenVPNDart {
   /// OpenVPN's Constructions, don't forget to implement the listeners
   /// onVPNStatusChanged is a listener to see what status the connection was
   OpenVPNDart();
+
+  ///Ensures TAP driver is installed (Windows only)
+  ///Call this during app initialization to check/install the driver
+  ///Returns true if driver is installed or successfully installed
+  ///Throws exception if installation fails
+  Future<bool> ensureTapDriver() async {
+    if (!Platform.isWindows) {
+      return true; // Not needed on other platforms
+    }
+
+    try {
+      await _channelControl.invokeMethod("ensureTapDriver");
+      return true;
+    } on PlatformException catch (e) {
+      throw Exception("Failed to ensure TAP driver: ${e.message}");
+    } catch (e) {
+      throw Exception("Unexpected error ensuring TAP driver: $e");
+    }
+  }
 
   ///This function should be called before any usage of OpenVPN
   ///All params required for iOS, make sure you read the plugin's documentation
@@ -77,7 +101,8 @@ class OpenVPNDart {
     }
 
     try {
-      final result = await _channelControl.invokeMethod("connect", {"config": config});
+      final result =
+          await _channelControl.invokeMethod("connect", {"config": config});
       return result;
     } on PlatformException catch (e) {
       throw ArgumentError("Failed to connect VPN: ${e.message}");
@@ -103,13 +128,18 @@ class OpenVPNDart {
 
   ///Request android permission (Return true if already granted)
   Future<bool> requestPermissionAndroid() async {
-    return _channelControl.invokeMethod("request_permission").then((value) => value ?? false);
+    return _channelControl
+        .invokeMethod("request_permission")
+        .then((value) => value ?? false);
   }
 
   ///Convert String to ConnectionStatus
   static ConnectionStatus _strToStatus(String? status) {
     status = status?.trim().toLowerCase();
-    if (status == null || status.isEmpty || status == "idle" || status == "invalid") {
+    if (status == null ||
+        status.isEmpty ||
+        status == "idle" ||
+        status == "invalid") {
       return ConnectionStatus.disconnected;
     }
     return ConnectionStatus.fromString(status);
@@ -126,7 +156,8 @@ class OpenVPNDart {
 
   Future<bool> checkTunnelConfiguration() async {
     try {
-      final result = await _channelControl.invokeMethod("checkTunnelConfiguration");
+      final result =
+          await _channelControl.invokeMethod("checkTunnelConfiguration");
       return result == true; // Ensure bool
     } on PlatformException catch (e) {
       throw Exception("checkTunnelConfiguration failed: ${e.message}");
