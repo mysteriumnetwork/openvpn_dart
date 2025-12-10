@@ -383,9 +383,10 @@ namespace openvpn_dart
 
   bool OpenVpnDartPlugin::SupportsDCO()
   {
-    // Check if openvpn.exe supports DCO (Data Channel Offload)
-    // DCO is built into OpenVPN 2.6+ on Windows
-    std::string test_cmd = "\"" + openvpn_executable_path_ + "\" --show-dco";
+    // Check if openvpn.exe has DCO (Data Channel Offload) available
+    // DCO is built into OpenVPN 2.6+ but may not be enabled
+    // Use --version to check build flags and DCO version status
+    std::string test_cmd = "\"" + openvpn_executable_path_ + "\" --version";
 
     SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
     HANDLE read_pipe, write_pipe;
@@ -440,20 +441,40 @@ namespace openvpn_dart
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    // Check if DCO is mentioned in output
-    bool hasDCO = output.find("ovpn-dco") != std::string::npos ||
-                  output.find("dco-win") != std::string::npos;
+    // Check if DCO is compiled in (look for [DCO] in build line)
+    bool dcoCompiled = output.find("[DCO]") != std::string::npos;
 
-    if (hasDCO)
+    // Check DCO version line - if it's not "N/A", DCO is actually available
+    bool dcoAvailable = false;
+    size_t dcoPos = output.find("DCO version:");
+    if (dcoPos != std::string::npos)
     {
-      OutputDebugStringA("DCO (Data Channel Offload) driver is supported");
-    }
-    else
-    {
-      OutputDebugStringA("DCO driver is NOT supported, will use TAP");
+      std::string dcoLine = output.substr(dcoPos, 100);
+      size_t endPos = dcoLine.find('\n');
+      if (endPos != std::string::npos)
+      {
+        dcoLine = dcoLine.substr(0, endPos);
+      }
+      // DCO is available if version is NOT "N/A"
+      dcoAvailable = (dcoLine.find("N/A") == std::string::npos);
+
+      if (dcoCompiled && dcoAvailable)
+      {
+        OutputDebugStringA(("DCO is compiled and available: " + dcoLine).c_str());
+        return true;
+      }
+      else if (dcoCompiled && !dcoAvailable)
+      {
+        OutputDebugStringA(("DCO compiled but not available (" + dcoLine + "). TAP driver will be used.").c_str());
+      }
     }
 
-    return hasDCO;
+    if (!dcoCompiled)
+    {
+      OutputDebugStringA("DCO not compiled into this OpenVPN build");
+    }
+
+    return false;
   }
 
   std::string OpenVpnDartPlugin::CheckSecurityFeatures()
@@ -857,17 +878,28 @@ namespace openvpn_dart
     command_line += " --route-method exe"; // Use external routing method for Windows
     command_line += " --route-delay 2";    // Give Windows time to set up routes
 
-    // Use DCO (Data Channel Offload) on Windows 11 for better compatibility
-    // Otherwise fall back to TAP-Windows6 driver
-    if (IsWindows11OrGreater() && SupportsDCO())
+    // Driver selection based on OS and DCO availability
+    // Windows 11 has security features that can block TAP-Windows6
+    // DCO (ovpn-dco) is kernel-integrated and compatible with Windows 11 security
+    bool isWin11 = IsWindows11OrGreater();
+    bool dcoSupported = SupportsDCO();
+
+    if (isWin11 && dcoSupported)
     {
       command_line += " --windows-driver ovpn-dco";
-      OutputDebugStringA("Using DCO (Data Channel Offload) driver for Windows 11");
+      OutputDebugStringA("Windows 11 with DCO: Using ovpn-dco driver");
+    }
+    else if (isWin11 && !dcoSupported)
+    {
+      // Windows 11 without DCO - this may fail due to security features
+      command_line += " --windows-driver tap-windows6";
+      OutputDebugStringA("WARNING: Windows 11 without DCO support. TAP driver may be blocked by security features (HVCI/Memory Integrity).");
+      OutputDebugStringA("Consider: 1) Upgrading to OpenVPN 2.6.9+ with DCO, or 2) Disabling Memory Integrity in Windows Security");
     }
     else
     {
       command_line += " --windows-driver tap-windows6";
-      OutputDebugStringA("Using TAP-Windows6 driver");
+      OutputDebugStringA("Windows 10: Using TAP-Windows6 driver");
     }
 
     OutputDebugStringA(("Starting OpenVPN with command: " + command_line).c_str());
