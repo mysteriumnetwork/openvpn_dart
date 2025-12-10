@@ -544,9 +544,20 @@ namespace openvpn_dart
 
     std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
 
+    // Extract bundled files if TAP installer is missing
     if (!std::filesystem::exists(installer_path))
     {
-      throw std::runtime_error("TAP installer not found in bundle: " + installer_path);
+      OutputDebugStringA("TAP installer not found, extracting from bundle...");
+      if (!ExtractBundledOpenVPN())
+      {
+        throw std::runtime_error("Failed to extract TAP installer from bundle");
+      }
+
+      // Verify extraction succeeded
+      if (!std::filesystem::exists(installer_path))
+      {
+        throw std::runtime_error("TAP installer not found even after extraction: " + installer_path);
+      }
     }
 
     OutputDebugStringA("TAP driver not found. Starting installation...");
