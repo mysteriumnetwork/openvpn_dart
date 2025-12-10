@@ -45,6 +45,7 @@ namespace openvpn_dart
         // TAP driver management
         bool IsTAPDriverInstalled();
         bool InstallTAPDriver();
+        void EnsureTAPDriver();
         std::string GetTAPAdapterName();
 
         // Windows version and driver detection
