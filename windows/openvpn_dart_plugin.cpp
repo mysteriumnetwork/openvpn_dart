@@ -6,18 +6,12 @@
 
 #include <windows.h>
 #include <shlobj.h>
-#include <shellapi.h>
 #include <tlhelp32.h>
 #include <memory>
 #include <sstream>
 #include <fstream>
 #include <filesystem>
 #include <regex>
-
-// Windows error code constants
-#ifndef ERROR_CANCELLED
-#define ERROR_CANCELLED 1223L
-#endif
 
 namespace openvpn_dart
 {
