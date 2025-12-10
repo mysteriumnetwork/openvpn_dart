@@ -332,6 +332,7 @@ namespace openvpn_dart
   bool OpenVpnDartPlugin::InstallTAPDriver()
   {
     // Run the TAP driver installer
+    // Note: App already runs with admin privileges (requireAdministrator manifest)
     std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
 
     if (!std::filesystem::exists(installer_path))
@@ -341,64 +342,63 @@ namespace openvpn_dart
     }
 
     OutputDebugStringA("Attempting to install TAP-Windows driver...");
-    OutputDebugStringA("NOTE: This requires administrator privileges (UAC prompt will appear)");
 
-    SHELLEXECUTEINFOA sei = {0};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = "runas"; // Request elevation
-    sei.lpFile = installer_path.c_str();
-    sei.lpParameters = "/S"; // Silent install
-    sei.nShow = SW_HIDE;
+    // Use CreateProcess since we already have admin rights
+    std::string command_line = "\"" + installer_path + "\" /S"; // Silent install
 
-    if (!ShellExecuteExA(&sei))
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi = {0};
+
+    if (!CreateProcessA(
+            nullptr,
+            const_cast<char *>(command_line.c_str()),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &si,
+            &pi))
     {
       DWORD error = GetLastError();
-      std::string errorMsg = "Failed to launch TAP installer. Error: " + std::to_string(error);
-
-      if (error == ERROR_CANCELLED || error == 1223)
-      {
-        errorMsg += " (User cancelled UAC prompt)";
-      }
-      else if (error == ERROR_ACCESS_DENIED)
-      {
-        errorMsg += " (Access denied - administrator rights required)";
-      }
-
-      OutputDebugStringA(errorMsg.c_str());
+      OutputDebugStringA(("Failed to launch TAP installer. Error: " + std::to_string(error)).c_str());
       return false;
     }
 
-    if (sei.hProcess)
+    OutputDebugStringA("Waiting for TAP driver installation to complete...");
+    DWORD waitResult = WaitForSingleObject(pi.hProcess, 60000); // 60 second timeout
+
+    if (waitResult == WAIT_TIMEOUT)
     {
-      OutputDebugStringA("Waiting for TAP driver installation to complete...");
-      DWORD waitResult = WaitForSingleObject(sei.hProcess, 60000); // 60 second timeout
-
-      if (waitResult == WAIT_TIMEOUT)
-      {
-        OutputDebugStringA("TAP driver installation timed out");
-        CloseHandle(sei.hProcess);
-        return false;
-      }
-
-      // Check exit code
-      DWORD exitCode = 0;
-      GetExitCodeProcess(sei.hProcess, &exitCode);
-      CloseHandle(sei.hProcess);
-
-      if (exitCode != 0)
-      {
-        OutputDebugStringA(("TAP installer exited with code: " + std::to_string(exitCode)).c_str());
-        // Exit code 0 = success, non-zero = failure
-        if (exitCode == 1)
-        {
-          OutputDebugStringA("Installation failed - may be blocked by Windows security");
-        }
-        return false;
-      }
-
-      OutputDebugStringA("TAP driver installation completed successfully");
+      OutputDebugStringA("TAP driver installation timed out");
+      TerminateProcess(pi.hProcess, 1);
+      CloseHandle(pi.hProcess);
+      CloseHandle(pi.hThread);
+      return false;
     }
+
+    // Check exit code
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (exitCode != 0)
+    {
+      OutputDebugStringA(("TAP installer exited with code: " + std::to_string(exitCode)).c_str());
+      if (exitCode == 1)
+      {
+        OutputDebugStringA("Installation failed - may be blocked by Windows 11 security (Memory Integrity)");
+      }
+      return false;
+    }
+
+    OutputDebugStringA("TAP driver installation completed successfully");
 
     // Give Windows a moment to register the driver
     Sleep(2000);
@@ -732,18 +732,16 @@ namespace openvpn_dart
           user_message += "1. Run this application as Administrator, OR\n";
           user_message += "2. Disable Memory Integrity in Windows Security:\n";
           user_message += "   Settings > Privacy & Security > Windows Security > Device Security > Core isolation\n";
-          user_message += "   Turn OFF 'Memory integrity', then restart your computer.\n\n";
+          user_message += "   Turn OFF 'Memory integrity', then restart your computer.";
         }
         else
         {
           user_message += "Please try one of these solutions:\n";
           user_message += "1. Run this application as Administrator\n";
-          user_message += "2. Install TAP-Windows manually from: https://openvpn.net/community-downloads/\n\n";
+          user_message += "2. Install TAP-Windows manually from: https://openvpn.net/community-downloads/";
         }
 
-        user_message += "Technical details: " + error_details;
-
-        OutputDebugStringA(("Initialization failed: " + user_message).c_str());
+        OutputDebugStringA(("Initialization warning: " + user_message).c_str());
         result->Error("TAP_DRIVER_REQUIRED", user_message);
         return;
       }
