@@ -274,6 +274,14 @@ namespace openvpn_dart
 
   bool OpenVpnDartPlugin::IsTAPDriverInstalled()
   {
+    // On Windows 11, DCO may be preferred over TAP
+    if (IsWindows11OrGreater() && SupportsDCO())
+    {
+      // DCO is built into Windows kernel, no separate driver needed
+      OutputDebugStringA("Using DCO driver (built-in for Windows 11)");
+      return true;
+    }
+
     // Check if TAP adapter exists in network adapters
     HKEY hKey;
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
@@ -318,33 +326,306 @@ namespace openvpn_dart
   bool OpenVpnDartPlugin::InstallTAPDriver()
   {
     // Run the TAP driver installer
+    // Note: App already runs with admin privileges (requireAdministrator manifest)
     std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
 
     if (!std::filesystem::exists(installer_path))
     {
+      OutputDebugStringA(("TAP installer not found at: " + installer_path).c_str());
       return false;
     }
 
-    SHELLEXECUTEINFOA sei = {0};
-    sei.cbSize = sizeof(sei);
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = "runas"; // Request elevation
-    sei.lpFile = installer_path.c_str();
-    sei.lpParameters = "/S"; // Silent install
-    sei.nShow = SW_HIDE;
+    OutputDebugStringA("Attempting to install TAP-Windows driver...");
 
-    if (!ShellExecuteExA(&sei))
+    // Use CreateProcess since we already have admin rights
+    std::string command_line = "\"" + installer_path + "\" /S"; // Silent install
+
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi = {0};
+
+    if (!CreateProcessA(
+            nullptr,
+            const_cast<char *>(command_line.c_str()),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            nullptr,
+            &si,
+            &pi))
+    {
+      DWORD error = GetLastError();
+      OutputDebugStringA(("Failed to launch TAP installer. Error: " + std::to_string(error)).c_str());
+      return false;
+    }
+
+    OutputDebugStringA("Waiting for TAP driver installation to complete...");
+    DWORD waitResult = WaitForSingleObject(pi.hProcess, 60000); // 60 second timeout
+
+    if (waitResult == WAIT_TIMEOUT)
+    {
+      OutputDebugStringA("TAP driver installation timed out");
+      TerminateProcess(pi.hProcess, 1);
+      CloseHandle(pi.hProcess);
+      CloseHandle(pi.hThread);
+      return false;
+    }
+
+    // Check exit code
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    if (exitCode != 0)
+    {
+      OutputDebugStringA(("TAP installer exited with code: " + std::to_string(exitCode)).c_str());
+      if (exitCode == 1)
+      {
+        OutputDebugStringA("Installation failed - may be blocked by Windows 11 security (Memory Integrity)");
+      }
+      return false;
+    }
+
+    OutputDebugStringA("TAP driver installation completed successfully");
+
+    // Give Windows a moment to register the driver
+    Sleep(2000);
+
+    bool installed = IsTAPDriverInstalled();
+    if (installed)
+    {
+      OutputDebugStringA("TAP driver verified: Successfully installed and detected");
+    }
+    else
+    {
+      OutputDebugStringA("TAP driver installation completed but driver not detected in registry");
+    }
+
+    return installed;
+  }
+
+  bool OpenVpnDartPlugin::IsWindows11OrGreater()
+  {
+    typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
+    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtDll)
+    {
+      RtlGetVersionPtr RtlGetVersion = (RtlGetVersionPtr)GetProcAddress(hNtDll, "RtlGetVersion");
+      if (RtlGetVersion)
+      {
+        RTL_OSVERSIONINFOW osInfo = {sizeof(osInfo)};
+        if (RtlGetVersion(&osInfo) == 0)
+        {
+          // Windows 11 is version 10.0 build 22000+
+          bool isWin11 = (osInfo.dwMajorVersion == 10 && osInfo.dwBuildNumber >= 22000) ||
+                         osInfo.dwMajorVersion > 10;
+          if (isWin11)
+          {
+            OutputDebugStringA(("Detected Windows 11 or greater (Build: " + std::to_string(osInfo.dwBuildNumber) + ")").c_str());
+          }
+          return isWin11;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool OpenVpnDartPlugin::SupportsDCO()
+  {
+    // Check if openvpn.exe has DCO (Data Channel Offload) available
+    // DCO is built into OpenVPN 2.6+ but may not be enabled
+    // Use --version to check build flags and DCO version status
+    std::string test_cmd = "\"" + openvpn_executable_path_ + "\" --version";
+
+    SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
+    HANDLE read_pipe, write_pipe;
+
+    if (!CreatePipe(&read_pipe, &write_pipe, &sa, 0))
     {
       return false;
     }
 
-    if (sei.hProcess)
+    STARTUPINFOA si = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdOutput = write_pipe;
+    si.hStdError = write_pipe;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi = {0};
+
+    BOOL success = CreateProcessA(
+        nullptr,
+        const_cast<char *>(test_cmd.c_str()),
+        nullptr,
+        nullptr,
+        TRUE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        nullptr,
+        &si,
+        &pi);
+
+    CloseHandle(write_pipe);
+
+    if (!success)
     {
-      WaitForSingleObject(sei.hProcess, INFINITE);
-      CloseHandle(sei.hProcess);
+      CloseHandle(read_pipe);
+      return false;
     }
 
-    return IsTAPDriverInstalled();
+    // Read output
+    char buffer[4096];
+    DWORD bytes_read;
+    std::string output;
+
+    while (ReadFile(read_pipe, buffer, sizeof(buffer) - 1, &bytes_read, nullptr) && bytes_read > 0)
+    {
+      buffer[bytes_read] = '\0';
+      output += buffer;
+    }
+
+    WaitForSingleObject(pi.hProcess, 5000);
+    CloseHandle(read_pipe);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    // Check if DCO is compiled in (look for [DCO] in build line)
+    bool dcoCompiled = output.find("[DCO]") != std::string::npos;
+
+    // Check DCO version line - if it's not "N/A", DCO is actually available
+    bool dcoAvailable = false;
+    size_t dcoPos = output.find("DCO version:");
+    if (dcoPos != std::string::npos)
+    {
+      std::string dcoLine = output.substr(dcoPos, 100);
+      size_t endPos = dcoLine.find('\n');
+      if (endPos != std::string::npos)
+      {
+        dcoLine = dcoLine.substr(0, endPos);
+      }
+      // DCO is available if version is NOT "N/A"
+      dcoAvailable = (dcoLine.find("N/A") == std::string::npos);
+
+      if (dcoCompiled && dcoAvailable)
+      {
+        OutputDebugStringA(("DCO is compiled and available: " + dcoLine).c_str());
+        return true;
+      }
+      else if (dcoCompiled && !dcoAvailable)
+      {
+        OutputDebugStringA(("DCO compiled but not available (" + dcoLine + "). TAP driver will be used.").c_str());
+      }
+    }
+
+    if (!dcoCompiled)
+    {
+      OutputDebugStringA("DCO not compiled into this OpenVPN build");
+    }
+
+    return false;
+  }
+
+  void OpenVpnDartPlugin::EnsureTAPDriver()
+  {
+    OutputDebugStringA("=== Checking TAP Driver ===");
+
+    if (IsTAPDriverInstalled())
+    {
+      OutputDebugStringA("TAP driver is already installed");
+      return;
+    }
+
+    std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
+
+    // Extract bundled files if TAP installer is missing
+    if (!std::filesystem::exists(installer_path))
+    {
+      OutputDebugStringA("TAP installer not found, extracting from bundle...");
+      if (!ExtractBundledOpenVPN())
+      {
+        throw std::runtime_error("Failed to extract TAP installer from bundle");
+      }
+
+      // Verify extraction succeeded
+      if (!std::filesystem::exists(installer_path))
+      {
+        throw std::runtime_error("TAP installer not found even after extraction: " + installer_path);
+      }
+    }
+
+    OutputDebugStringA("TAP driver not found. Starting installation...");
+
+    if (!InstallTAPDriver())
+    {
+      std::string error_msg = "Failed to install TAP driver.";
+
+      if (IsWindows11OrGreater())
+      {
+        error_msg += "\n\nWindows 11 detected. To install the driver:\n";
+        error_msg += "1. Run this application as Administrator, OR\n";
+        error_msg += "2. Temporarily disable Memory Integrity:\n";
+        error_msg += "   Settings > Privacy & Security > Windows Security > ";
+        error_msg += "   Device Security > Core isolation > Memory integrity (turn OFF)\n";
+        error_msg += "   Then restart the app and try again.";
+      }
+      else
+      {
+        error_msg += " Please run the application as Administrator and try again.";
+      }
+
+      throw std::runtime_error(error_msg);
+    }
+
+    // Verify installation succeeded
+    if (!IsTAPDriverInstalled())
+    {
+      throw std::runtime_error("TAP driver installation completed but driver not detected. Please restart your computer and try again.");
+    }
+
+    OutputDebugStringA("TAP driver installed successfully");
+  }
+
+  std::string OpenVpnDartPlugin::CheckSecurityFeatures()
+  {
+    std::string warnings;
+
+    if (!IsWindows11OrGreater())
+    {
+      return warnings;
+    }
+
+    // Check if running as Administrator
+    BOOL isAdmin = FALSE;
+    SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+    PSID AdministratorsGroup;
+
+    if (AllocateAndInitializeSid(&NtAuthority, 2,
+                                 SECURITY_BUILTIN_DOMAIN_RID,
+                                 DOMAIN_ALIAS_RID_ADMINS,
+                                 0, 0, 0, 0, 0, 0,
+                                 &AdministratorsGroup))
+    {
+      CheckTokenMembership(NULL, AdministratorsGroup, &isAdmin);
+      FreeSid(AdministratorsGroup);
+    }
+
+    if (!isAdmin)
+    {
+      warnings += "Not running as Administrator. ";
+    }
+
+    warnings += "Windows 11 detected. If connection fails, check Windows Security: ";
+    warnings += "Settings > Privacy & Security > Windows Security > Device Security > Core isolation. ";
+    warnings += "Try disabling 'Memory integrity' if issues persist.";
+
+    return warnings;
   }
 
   std::string OpenVpnDartPlugin::GetTAPAdapterName()
@@ -397,38 +678,76 @@ namespace openvpn_dart
 
     const std::string &method = method_call.method_name();
 
-    if (method == "initialize")
+    if (method == "ensureTapDriver")
     {
-      std::string error_details = "";
+      try
+      {
+        EnsureTAPDriver();
+        result->Success(flutter::EncodableValue(true));
+      }
+      catch (const std::exception &e)
+      {
+        result->Error("TAP_DRIVER_ERROR", e.what());
+      }
+    }
+    else if (method == "initialize")
+    {
+      OutputDebugStringA("=== OpenVPN Initialization Starting ===");
+
+      // Log Windows version
+      if (IsWindows11OrGreater())
+      {
+        OutputDebugStringA("Detected: Windows 11 or greater");
+        std::string secWarnings = CheckSecurityFeatures();
+        if (!secWarnings.empty())
+        {
+          OutputDebugStringA(("Security warnings: " + secWarnings).c_str());
+        }
+      }
+      else
+      {
+        OutputDebugStringA("Detected: Windows 10 or earlier");
+      }
+
+      // Log DCO support
+      if (std::filesystem::exists(openvpn_executable_path_))
+      {
+        if (SupportsDCO())
+        {
+          OutputDebugStringA("DCO (Data Channel Offload) is available");
+        }
+        else
+        {
+          OutputDebugStringA("DCO not available, will use TAP driver");
+        }
+      }
+
+      // Just check if TAP driver is installed, don't auto-install
       bool tap_installed = IsTAPDriverInstalled();
 
       if (!tap_installed)
       {
-        std::string installer_path = bundled_path_ + "\\tap-windows-installer.exe";
-        error_details += "TAP driver not found. ";
-        error_details += "Installer path: " + installer_path + " ";
-        error_details += std::filesystem::exists(installer_path) ? "(exists) " : "(missing) ";
-        error_details += "Bundled path: " + bundled_path_ + " ";
+        std::string user_message = "TAP-Windows network driver is required but not installed.\n\n";
+        user_message += "Please call 'ensureTapDriver()' method to install the driver.\n\n";
 
-        // Try to install it
-        if (std::filesystem::exists(installer_path))
+        if (IsWindows11OrGreater())
         {
-          if (!InstallTAPDriver())
-          {
-            error_details += "Auto-install failed. ";
-          }
-          else
-          {
-            tap_installed = true;
-          }
+          user_message += "Windows 11 Note: You may need to run as Administrator.\n";
+          user_message += "If installation fails:\n";
+          user_message += "1. Run this application as Administrator, OR\n";
+          user_message += "2. Disable Memory Integrity in Windows Security:\n";
+          user_message += "   Settings > Privacy & Security > Windows Security > Device Security > Core isolation\n";
+          user_message += "   Turn OFF 'Memory integrity', then restart your computer.";
         }
-      }
+        else
+        {
+          user_message += "Please try one of these solutions:\n";
+          user_message += "1. Run this application as Administrator\n";
+          user_message += "2. Install TAP-Windows manually from: https://openvpn.net/community-downloads/";
+        }
 
-      if (!tap_installed)
-      {
-        result->Error("TAP_DRIVER_MISSING",
-                      "TAP driver required but not available. " + error_details +
-                          "Please install TAP-Windows manually or ensure app runs with admin rights.");
+        OutputDebugStringA(("Initialization warning: " + user_message).c_str());
+        result->Error("TAP_DRIVER_REQUIRED", user_message);
         return;
       }
 
@@ -679,9 +998,32 @@ namespace openvpn_dart
     command_line += " --config \"" + config_file_path_ + "\"";
     command_line += " --log \"" + log_file_path_ + "\"";
     command_line += " --verb 3";
-    command_line += " --route-method exe";            // Use external routing method for Windows
-    command_line += " --route-delay 2";               // Give Windows time to set up routes
-    command_line += " --windows-driver tap-windows6"; // Use TAP-Windows6 driver
+    command_line += " --route-method exe"; // Use external routing method for Windows
+    command_line += " --route-delay 2";    // Give Windows time to set up routes
+
+    // Driver selection based on OS and DCO availability
+    // Windows 11 has security features that can block TAP-Windows6
+    // DCO (ovpn-dco) is kernel-integrated and compatible with Windows 11 security
+    bool isWin11 = IsWindows11OrGreater();
+    bool dcoSupported = SupportsDCO();
+
+    if (isWin11 && dcoSupported)
+    {
+      command_line += " --windows-driver ovpn-dco";
+      OutputDebugStringA("Windows 11 with DCO: Using ovpn-dco driver");
+    }
+    else if (isWin11 && !dcoSupported)
+    {
+      // Windows 11 without DCO - this may fail due to security features
+      command_line += " --windows-driver tap-windows6";
+      OutputDebugStringA("WARNING: Windows 11 without DCO support. TAP driver may be blocked by security features (HVCI/Memory Integrity).");
+      OutputDebugStringA("Consider: 1) Upgrading to OpenVPN 2.6.9+ with DCO, or 2) Disabling Memory Integrity in Windows Security");
+    }
+    else
+    {
+      command_line += " --windows-driver tap-windows6";
+      OutputDebugStringA("Windows 10: Using TAP-Windows6 driver");
+    }
 
     OutputDebugStringA(("Starting OpenVPN with command: " + command_line).c_str());
     OutputDebugStringA(("Log file path: " + log_file_path_).c_str());
@@ -713,14 +1055,37 @@ namespace openvpn_dart
     {
       DWORD error = GetLastError();
       std::string error_msg = "Failed to start OpenVPN. Error code: " + std::to_string(error);
-      if (error == 740)
+
+      // Add Windows 11 specific hints
+      if (IsWindows11OrGreater())
       {
-        error_msg += " (Elevation required)";
+        error_msg += " [Windows 11 detected]";
       }
-      else if (error == 2)
+
+      // More detailed error codes
+      switch (error)
       {
-        error_msg += " (File not found: " + openvpn_executable_path_ + ")";
+      case 740:
+        error_msg += " (ERROR_ELEVATION_REQUIRED: Please run the app as Administrator)";
+        break;
+      case 5:
+        error_msg += " (ERROR_ACCESS_DENIED: Security policy may be blocking OpenVPN)";
+        if (IsWindows11OrGreater())
+        {
+          error_msg += ". Try disabling Memory Integrity in Windows Security settings";
+        }
+        break;
+      case 2:
+        error_msg += " (ERROR_FILE_NOT_FOUND: " + openvpn_executable_path_ + ")";
+        break;
+      case 193:
+        error_msg += " (ERROR_BAD_EXE_FORMAT: Architecture mismatch or corrupt executable)";
+        break;
+      case 1450:
+        error_msg += " (ERROR_NO_SYSTEM_RESOURCES: Insufficient system resources)";
+        break;
       }
+
       OutputDebugStringA(error_msg.c_str());
       CloseHandle(pipe_read_);
       CloseHandle(pipe_write_);

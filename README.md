@@ -477,31 +477,6 @@ Ensure your app manifest requests administrator privileges:
 
 ## Advanced Usage
 
-### Custom OpenVPN Path
-
-For development, you can specify a custom OpenVPN installation:
-
-```cpp
-// In openvpn_dart_plugin.cpp constructor
-openvpn_executable_path_ = "C:\\CustomPath\\openvpn.exe";
-```
-
-### Kill Switch
-
-Implement a kill switch to block traffic when VPN disconnects:
-
-```dart
-_vpn.statusStream().listen((status) {
-  if (status == ConnectionStatus.disconnected) {
-    // Block internet traffic
-    blockTraffic();
-  } else if (status == ConnectionStatus.connected) {
-    // Allow internet traffic
-    allowTraffic();
-  }
-});
-```
-
 ### Auto-Reconnect
 
 ```dart
@@ -540,15 +515,7 @@ _vpn.statusStream().listen((status) async {
 
 ## License
 
-This plugin uses OpenVPN Community Edition, which is licensed under GPL v2.
-
-When distributing your app:
-1. Include OpenVPN license file
-2. Provide attribution in your About dialog
-3. Link to OpenVPN source code
-4. Comply with GPL v2 requirements
-
-See [LICENSE](LICENSE) for details.
+Project license: [MIT](LICENSE).
 
 ## Contributing
 

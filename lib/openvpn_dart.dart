@@ -30,6 +30,25 @@ class OpenVPNDart {
   /// onVPNStatusChanged is a listener to see what status the connection was
   OpenVPNDart();
 
+  ///Ensures TAP driver is installed (Windows only)
+  ///Call this during app initialization to check/install the driver
+  ///Returns true if driver is installed or successfully installed
+  ///Throws exception if installation fails
+  Future<bool> ensureTapDriver() async {
+    if (!Platform.isWindows) {
+      return true; // Not needed on other platforms
+    }
+
+    try {
+      await _channelControl.invokeMethod("ensureTapDriver");
+      return true;
+    } on PlatformException catch (e) {
+      throw Exception("Failed to ensure TAP driver: ${e.message}");
+    } catch (e) {
+      throw Exception("Unexpected error ensuring TAP driver: $e");
+    }
+  }
+
   ///This function should be called before any usage of OpenVPN
   ///All params required for iOS, make sure you read the plugin's documentation
   ///
@@ -130,9 +149,7 @@ class OpenVPNDart {
   /// is a listener to see what status the connection was
   Stream<ConnectionStatus> statusStream() {
     return _vpnStatusSnapshot().asBroadcastStream().distinct().map((event) {
-      print('[OpenVPN] Raw status from native: "$event"');
       final status = _strToStatus(event);
-      print('[OpenVPN] Converted to: ${status.name}');
       return status;
     });
   }
