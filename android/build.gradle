@@ -2,10 +2,11 @@ group = "com.mysteriumvpn.openvpn_dart"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    ext.kotlin_version = "1.8.22"
+    ext.kotlin_version = "2.1.0"
     repositories {
         google()
         mavenCentral()
+        jcenter() // For de.blinkt library
     }
 
     dependencies {
@@ -18,6 +19,19 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        jcenter() // Legacy, but may have some packages
+        
+        // ICS-OpenVPN Maven repository
+        maven {
+            url "https://raw.githubusercontent.com/schwabe/ics-openvpn/master/build-tools/maven/"
+            name = "ics-openvpn-maven"
+        }
+        
+        // Alternative Maven repos for VPN libraries
+        maven {
+            url "https://jitpack.io"
+            name = "jitpack"
+        }
     }
 }
 
@@ -41,13 +55,37 @@ android {
     sourceSets {
         main.java.srcDirs += "src/main/kotlin"
         test.java.srcDirs += "src/test/kotlin"
+        
+        // Include OpenSSL shared libraries
+        main.jniLibs.srcDirs += ['src/main/cpp/openssl/android_openssl/ssl_3']
     }
 
     defaultConfig {
         minSdk = 21
+        
+        // NDK configuration for OpenVPN 3
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'
+        }
+    }
+
+    // CMake configuration for building native OpenVPN 3 library
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+            version "3.22.1"
+        }
     }
 
     dependencies {
+        // Kotlin and coroutines
+        implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+        
+        // Android framework
+        implementation("androidx.appcompat:appcompat:1.6.1")
+        implementation("androidx.core:core:1.12.0")
+        
+        // Testing
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")
     }

@@ -2,6 +2,12 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        
+        // GitHub Maven for ics-openvpn/de.blinkt library
+        maven {
+            url = uri("https://raw.githubusercontent.com/schwabe/ics-openvpn/master/build-tools/maven/")
+            name = "ics-openvpn-maven"
+        }
     }
 }
 

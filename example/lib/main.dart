@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:openvpn_dart/openvpn_dart.dart';
-import 'package:openvpn_dart/vpn_status.dart';
 
 final _messangerKey = GlobalKey<ScaffoldMessengerState>();
 
@@ -200,6 +199,47 @@ class _MyAppState extends State<MyApp> {
                   }
                 },
               ),
+              const Divider(),
+              const Text('Notification Permissions (Android 13+)',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              TextButton(
+                child: const Text("Check Notification Permission"),
+                onPressed: () async {
+                  try {
+                    final permission = await openVPNPlugin.checkNotificationPermission();
+                    _showSnackBar("Notification permission: ${permission.name}");
+                  } catch (e, stackTrace) {
+                    debugPrint("Check Notification Permission Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Failed to check permission: $e", isError: true);
+                  }
+                },
+              ),
+              TextButton(
+                child: const Text("Request Notification Permission"),
+                onPressed: () async {
+                  try {
+                    final permission = await openVPNPlugin.requestNotificationPermission();
+                    _showSnackBar("Notification permission result: ${permission.name}");
+                  } catch (e, stackTrace) {
+                    debugPrint(
+                        "Request Notification Permission Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Failed to request permission: $e", isError: true);
+                  }
+                },
+              ),
+              TextButton(
+                child: const Text("Open Notification Settings"),
+                onPressed: () async {
+                  try {
+                    final permission = await openVPNPlugin.openAppNotificationSettings();
+                    _showSnackBar("Returned with permission: ${permission.name}");
+                  } catch (e, stackTrace) {
+                    debugPrint("Open Notification Settings Error: $e\nStack trace: $stackTrace");
+                    _showSnackBar("Failed to open settings: $e", isError: true);
+                  }
+                },
+              ),
+              const Divider(),
               TextButton(
                 child: const Text("Show Logs"),
                 onPressed: () async {
@@ -298,7 +338,7 @@ String get config {
 client
 dev tun
 proto tcp
-remote 88.99.85.196 1194
+remote 23.88.100.197 1194
 nobind
 persist-key
 persist-tun
@@ -306,9 +346,11 @@ remote-cert-tls server
 
 $certOption
 auth-user-pass inline
-data-ciphers AES-256-GCM:AES-128-GCM:AES-256-CBC:AES-128-CBC
+cipher AES-256-CBC
 auth SHA256
+data-ciphers AES-256-CBC
 verb 3
+
 <ca>
 -----BEGIN CERTIFICATE-----
 MIIDXTCCAkWgAwIBAgIUeWpW3vmG6W8g/jtfRrzhZI9uwrgwDQYJKoZIhvcNAQEL
@@ -332,6 +374,7 @@ MLUM00xZpx1x2FBrIGLhanF7qAYi5W+FKWII6d3Wn7XFR/R8sx5p15c40F7Rr/xs
 vg==
 -----END CERTIFICATE-----
 </ca>
+
 <auth-user-pass>
 b1c9af339f776072bbbfb4a1b526408808b0
 LjfEMsbBFFZfT5UkjO6czeIr64eJjpyGRCeqE3G97cg

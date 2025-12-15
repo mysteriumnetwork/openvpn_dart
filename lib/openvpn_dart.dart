@@ -1,27 +1,27 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:openvpn_dart/src/models/notification_permission.dart';
 import 'package:openvpn_dart/vpn_status.dart';
+
+export 'src/models/models.dart';
+export 'vpn_status.dart';
 
 class OpenVPNDart {
   ///Channel's names of _VPNStatusSnapshot
-  static const String _eventChannelVPNStatus =
-      "id.mysteriumvpn.openvpn_flutter/vpnstatus";
+  static const String _eventChannelVPNStatus = "id.mysteriumvpn.openvpn_flutter/vpnstatus";
 
   ///Channel's names of _channelControl
-  static const String _methodChannelVpnControl =
-      "id.mysteriumvpn.openvpn_flutter/vpncontrol";
+  static const String _methodChannelVpnControl = "id.mysteriumvpn.openvpn_flutter/vpncontrol";
 
   ///Method channel to invoke methods from native side
-  static const MethodChannel _channelControl =
-      MethodChannel(_methodChannelVpnControl);
+  static const MethodChannel _channelControl = MethodChannel(_methodChannelVpnControl);
 
   ///Snapshot of stream that produced by native side
   static Stream<String> _vpnStatusSnapshot() =>
-      const EventChannel(_eventChannelVPNStatus)
-          .receiveBroadcastStream()
-          .cast();
+      const EventChannel(_eventChannelVPNStatus).receiveBroadcastStream().cast();
 
   ///To indicate the engine already initialize
   bool initialized = false;
@@ -101,8 +101,7 @@ class OpenVPNDart {
     }
 
     try {
-      final result =
-          await _channelControl.invokeMethod("connect", {"config": config});
+      final result = await _channelControl.invokeMethod("connect", {"config": config});
       return result;
     } on PlatformException catch (e) {
       throw ArgumentError("Failed to connect VPN: ${e.message}");
@@ -128,18 +127,13 @@ class OpenVPNDart {
 
   ///Request android permission (Return true if already granted)
   Future<bool> requestPermissionAndroid() async {
-    return _channelControl
-        .invokeMethod("request_permission")
-        .then((value) => value ?? false);
+    return _channelControl.invokeMethod("request_permission").then((value) => value ?? false);
   }
 
   ///Convert String to ConnectionStatus
   static ConnectionStatus _strToStatus(String? status) {
     status = status?.trim().toLowerCase();
-    if (status == null ||
-        status.isEmpty ||
-        status == "idle" ||
-        status == "invalid") {
+    if (status == null || status.isEmpty || status == "idle" || status == "invalid") {
       return ConnectionStatus.disconnected;
     }
     return ConnectionStatus.fromString(status);
@@ -149,15 +143,20 @@ class OpenVPNDart {
   /// is a listener to see what status the connection was
   Stream<ConnectionStatus> statusStream() {
     return _vpnStatusSnapshot().asBroadcastStream().distinct().map((event) {
+<<<<<<< Updated upstream
       final status = _strToStatus(event);
+=======
+      debugPrint('[OpenVPN] Raw status from native: "$event"');
+      final status = _strToStatus(event);
+      debugPrint('[OpenVPN] Converted to: ${status.name}');
+>>>>>>> Stashed changes
       return status;
     });
   }
 
   Future<bool> checkTunnelConfiguration() async {
     try {
-      final result =
-          await _channelControl.invokeMethod("checkTunnelConfiguration");
+      final result = await _channelControl.invokeMethod("checkTunnelConfiguration");
       return result == true; // Ensure bool
     } on PlatformException catch (e) {
       throw Exception("checkTunnelConfiguration failed: ${e.message}");
@@ -177,6 +176,43 @@ class OpenVPNDart {
       await _channelControl.invokeMethod("setupTunnel");
     } on PlatformException catch (e) {
       throw Exception("setupTunnel failed: ${e.message}");
+    }
+  }
+
+  /// Check notification permission status (Android 13+)
+  /// Returns [NotificationPermission.granted] if permission is granted
+  /// Returns [NotificationPermission.denied] if permission is denied
+  /// Returns [NotificationPermission.permanentlyDenied] if permission is permanently denied
+  Future<NotificationPermission> checkNotificationPermission() async {
+    try {
+      final String result = await _channelControl.invokeMethod('checkNotificationPermission');
+      return NotificationPermission.fromString(result);
+    } on PlatformException catch (e) {
+      throw Exception("checkNotificationPermission failed: ${e.message}");
+    }
+  }
+
+  /// Request notification permission (Android 13+)
+  /// Shows system permission dialog
+  /// Returns the permission status after the user responds
+  Future<NotificationPermission> requestNotificationPermission() async {
+    try {
+      final String result = await _channelControl.invokeMethod('requestNotificationPermission');
+      return NotificationPermission.fromString(result);
+    } on PlatformException catch (e) {
+      throw Exception("requestNotificationPermission failed: ${e.message}");
+    }
+  }
+
+  /// Open app's notification settings page
+  /// Useful when permission is permanently denied
+  /// Returns the permission status after user returns from settings
+  Future<NotificationPermission> openAppNotificationSettings() async {
+    try {
+      final String result = await _channelControl.invokeMethod('openAppNotificationSettings');
+      return NotificationPermission.fromString(result);
+    } on PlatformException catch (e) {
+      throw Exception("openAppNotificationSettings failed: ${e.message}");
     }
   }
 }
