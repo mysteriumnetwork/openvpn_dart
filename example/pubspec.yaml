@@ -6,8 +6,8 @@ description: "Demonstrates how to use the openvpn_dart plugin."
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
 
 environment:
-  sdk: "^3.0.0"
-  flutter: 3.35.3
+  sdk: ">=3.11.0 <4.0.0"
+  flutter: 3.44.7
 
 dependencies:
   flutter:
@@ -15,6 +15,10 @@ dependencies:
 
   openvpn_dart:
     path: ../
+
+  # Example-only: request the Android 13+ POST_NOTIFICATIONS runtime permission so the
+  # VPN foreground notification is shown.
+  permission_handler: 12.0.3
 
 dev_dependencies:
   integration_test:
