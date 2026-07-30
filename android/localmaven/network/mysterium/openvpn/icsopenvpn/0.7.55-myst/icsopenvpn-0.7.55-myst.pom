@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>network.mysterium.openvpn</groupId>
+    <artifactId>icsopenvpn</artifactId>
+    <version>0.7.55-myst</version>
+    <packaging>aar</packaging>
+    <description>ics-openvpn backend (built from source, v0.7.55). See PROVENANCE.md.</description>
+    <dependencies>
+        <dependency>
+            <groupId>androidx.annotation</groupId>
+            <artifactId>annotation</artifactId>
+            <version>1.9.1</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>androidx.core</groupId>
+            <artifactId>core-ktx</artifactId>
+            <version>1.13.1</version>
+            <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+</project>

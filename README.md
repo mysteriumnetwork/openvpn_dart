@@ -19,7 +19,7 @@ A Flutter plugin for OpenVPN connectivity with built-in Windows support. Connect
 - ✅ Windows (fully bundled)
 - ✅ iOS (via NetworkExtension)
 - ✅ macOS (via NetworkExtension)
-- 🚧 Android (coming soon)
+- ✅ Android (via ics-openvpn, bundled as a from-source AAR)
 
 ✅ **Real-Time Status Updates**
 - Stream connection status changes
@@ -69,6 +69,80 @@ For Windows, you need to bundle OpenVPN with your app:
    ```
 
 That's it! OpenVPN is now bundled with your app.
+
+### Android Setup
+
+Android is powered by the **ics-openvpn** engine, bundled as an AAR that is **built from source**
+(not a third-party prebuilt) and committed under `android/localmaven/`. See
+[`android/localmaven/PROVENANCE.md`](android/localmaven/PROVENANCE.md) for the exact upstream tag,
+pinned submodule SHAs, OpenSSL/OpenVPN versions, and SHA-256. The plugin's own manifest contributes
+`OpenVPNService` (registered with `BIND_VPN_SERVICE`), the status service, and all required
+permissions automatically — but a consuming app must do the following (steps 1–2 are required,
+step 3 is needed only to show the notification):
+
+**1. Expose the bundled AAR's Maven repo.** The AAR is delivered as
+`network.mysterium.openvpn:icsopenvpn` from a local Maven repo inside the plugin. Add it to your
+app's `android/build.gradle.kts` (`allprojects { repositories { … } }`) or
+`settings.gradle.kts` (`dependencyResolutionManagement`), pointing at the plugin's `localmaven`
+folder. For the bundled example this is a relative path:
+
+```kotlin
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url = uri("${rootProject.projectDir}/../../android/localmaven") } // path to openvpn_dart/android/localmaven
+    }
+}
+```
+
+> For production, publish the AAR to a shared Maven (e.g. GitHub Packages under your org) and point
+> the repo there instead — this removes the relative-path fragility. See "Rebuilding the AAR" below.
+
+**2. Extract native libraries.** ics-openvpn launches the OpenVPN binary as a process, which
+requires native libs on disk. Modern AGP defaults to `extractNativeLibs=false`, which breaks this
+(the process can't spawn). In your app's `android/app/build.gradle.kts`:
+
+```kotlin
+android {
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+    }
+}
+```
+
+**3. (Android 13+) Request the notification permission.** The VPN runs as a foreground service.
+To show its notification, request `POST_NOTIFICATIONS` at runtime (e.g. via the
+[`permission_handler`](https://pub.dev/packages/permission_handler) package, as the example app
+does). The VPN still connects without it; only the notification is suppressed.
+
+**Notes**
+- `connect(String config)` takes a full inline `.ovpn`; credentials come from an inline
+  `<auth-user-pass>` block in that config.
+- The service runs in the app's main process (consistent with `wireguard_dart`), so only one VPN
+  tunnel is active at a time — disconnect one protocol before connecting the other.
+- The notification (key icon, title, `Connected ↑/↓`) is styled to match a WireGuard notification;
+  there is no "pause" action.
+
+#### Rebuilding / updating the AAR
+
+The committed AAR can be regenerated from upstream source with one script (requires Android NDK,
+`swig`, JDK 17):
+
+```bash
+brew install swig                       # one-time (macOS)
+scripts/build_android_aar.sh 0.7.55-myst
+```
+
+It clones the pinned `schwabe/ics-openvpn` tag, applies
+`scripts/icsopenvpn-mysterium-*.patch` (application→library repackaging, branding strip,
+single-process, notification styling), builds the native libs for all 4 ABIs, verifies the output,
+and stages it into `android/localmaven/`. Then bump the coordinate in `android/build.gradle` and the
+SHA-256 in `PROVENANCE.md` (the script prints both).
+
+> **Maintainers:** see [doc/android_architecture.md](doc/android_architecture.md) for how the
+> Android plugin works internally (channels, single-process design, the AAR, and gotchas), and
+> [android/localmaven/PROVENANCE.md](android/localmaven/PROVENANCE.md) for the AAR's build provenance.
 
 ## Usage
 
@@ -387,15 +461,26 @@ Future<String> loadConfigFromAPI() async {
 **`statusStream()`**
 - Returns `Stream<ConnectionStatus>` for real-time updates
 
+**`tunnelStatistics()`**
+- Returns `Future<VPNStatistics?>` — cumulative session traffic (`totalDownload`, `totalUpload`,
+  `latestHandshake`). `null` if unavailable / unsupported on the platform. (Implemented on Android.)
+
+**`setupTunnel()` / `checkTunnelConfiguration()` / `removeTunnelConfiguration()`**
+- Prepare / query / remove the tunnel configuration. On iOS/macOS these manage the
+  NetworkExtension config; on Android `setupTunnel`/`checkTunnelConfiguration` map to VPN consent
+  and `removeTunnelConfiguration` just ensures the tunnel is stopped.
+
+**`requestPermissionAndroid()`**
+- Android only — requests VPN consent, returns `Future<bool>` (true if granted).
+
 ### ConnectionStatus
 
-Enum values:
-- `ConnectionStatus.disconnected` - Not connected
+Enum values (see [lib/vpn_status.dart](lib/vpn_status.dart)):
 - `ConnectionStatus.connecting` - Connection in progress
 - `ConnectionStatus.connected` - Successfully connected
-- `ConnectionStatus.reconnecting` - Attempting to reconnect
 - `ConnectionStatus.disconnecting` - Disconnection in progress
-- `ConnectionStatus.error` - Connection error occurred
+- `ConnectionStatus.disconnected` - Not connected
+- `ConnectionStatus.unknown` - Indeterminate / unrecognized state
 
 ## Platform-Specific Notes
 
@@ -421,8 +506,19 @@ Enum values:
 - VPN entitlements in your app
 - Keychain access for storing credentials
 
-**Setup:**
-See [iOS Setup Guide](docs/ios_setup.md) for detailed instructions.
+### Android
+
+**Requirements:**
+- `minSdk` 21+
+- `useLegacyPackaging = true` for jniLibs (see Android Setup) — the OpenVPN binary is executed at runtime
+- The bundled `network.mysterium.openvpn:icsopenvpn` AAR resolved via Maven (see Android Setup)
+- `POST_NOTIFICATIONS` requested at runtime on Android 13+ for the foreground-service notification
+
+**Engine:** ics-openvpn (OpenVPN 2.7 / OpenSSL 3.4.1), built from source — see
+[`android/localmaven/PROVENANCE.md`](android/localmaven/PROVENANCE.md).
+
+**Bundle size:** ~33 MB AAR (native libs for arm64-v8a, armeabi-v7a, x86, x86_64; per-ABI app
+bundles deliver only the device's slice).
 
 ## Troubleshooting
 
@@ -497,6 +593,13 @@ _vpn.statusStream().listen((status) async {
 ## License
 
 Project license: [MIT](LICENSE).
+
+**Third-party engines / Android note:** the Android backend bundles **ics-openvpn**, which is
+**GPLv2** (with additional terms). Shipping it inside an app has copyleft implications — confirm
+your app's licensing accordingly. (iOS/macOS use OpenVPNAdapter→OpenVPN3 and Windows uses the
+official OpenVPN binaries, which carry their own licenses.) See
+[`android/localmaven/PROVENANCE.md`](android/localmaven/PROVENANCE.md) for the exact ics-openvpn
+source, versions, and build provenance.
 
 ## Contributing
 

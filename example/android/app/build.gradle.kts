@@ -35,6 +35,20 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Exercise R8 so the plugin's consumer-rules.pro keep rules are verified (the
+            // de.blinkt.openvpn JNI/AIDL classes must survive minification).
+            isMinifyEnabled = true
+            isShrinkResources = true
+        }
+    }
+
+    // REQUIRED by ics-openvpn: it executes libovpnexec.so as a process, which only works if the
+    // native libs are extracted to disk. Modern AGP defaults to extractNativeLibs=false, so the
+    // binary can't be spawned (NullPointerException on Process). Apps consuming openvpn_dart must
+    // set this too.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }

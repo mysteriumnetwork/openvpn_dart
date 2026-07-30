@@ -29,13 +29,14 @@ android {
 
     compileSdk = 35
 
+    // Match the bundled ics-openvpn AAR (built with Java 17).
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11
+        jvmTarget = JavaVersion.VERSION_17
     }
 
     sourceSets {
@@ -45,11 +46,14 @@ android {
 
     defaultConfig {
         minSdk = 21
+        consumerProguardFiles "consumer-rules.pro"
     }
 
-    dependencies {
-        testImplementation("org.jetbrains.kotlin:kotlin-test")
-        testImplementation("org.mockito:mockito-core:5.0.0")
+    // Native .so (OpenVPN engine) packaging — ensure the loader finds the libs.
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     testOptions {
@@ -63,4 +67,22 @@ android {
             }
         }
     }
+}
+
+repositories {
+    // Local Maven repo holding the ics-openvpn AAR built from source.
+    // See android/localmaven/PROVENANCE.md. Consuming apps must also expose this repo
+    // (the example app does so in its root build.gradle.kts) until it is published to a
+    // shared Maven (CI). A library module cannot use a files()/flatDir .aar dependency.
+    maven { url = uri("${projectDir}/localmaven") }
+}
+
+dependencies {
+    // ics-openvpn backend (OpenVPN engine + native libs), built from source.
+    implementation "network.mysterium.openvpn:icsopenvpn:0.7.55-myst"
+
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test")
+    testImplementation("org.mockito:mockito-core:5.0.0")
 }
