@@ -368,26 +368,31 @@ class _ConfigField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      enabled: enabled,
-      minLines: 5,
-      maxLines: 10,
-      style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-      decoration: InputDecoration(
-        labelText: 'OpenVPN config (.ovpn)',
-        helperText: enabled
-            ? 'Paste your own .ovpn config — required to connect (use a per-device config)'
-            : 'Disconnect to edit the config',
-        alignLabelWithHint: true,
-        border: const OutlineInputBorder(),
-        suffixIcon: enabled && controller.text.isNotEmpty
-            ? IconButton(
-                tooltip: 'Clear',
-                icon: const Icon(Icons.clear),
-                onPressed: () => controller.clear(),
-              )
-            : null,
+    // Rebuild on every keystroke so the clear button tracks whether the field has text
+    // (a plain StatelessWidget wouldn't react to controller changes).
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, _) => TextField(
+        controller: controller,
+        enabled: enabled,
+        minLines: 5,
+        maxLines: 10,
+        style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+        decoration: InputDecoration(
+          labelText: 'OpenVPN config (.ovpn)',
+          helperText: enabled
+              ? 'Paste your own .ovpn config — required to connect (use a per-device config)'
+              : 'Disconnect to edit the config',
+          alignLabelWithHint: true,
+          border: const OutlineInputBorder(),
+          suffixIcon: enabled && value.text.isNotEmpty
+              ? IconButton(
+                  tooltip: 'Clear',
+                  icon: const Icon(Icons.clear),
+                  onPressed: controller.clear,
+                )
+              : null,
+        ),
       ),
     );
   }

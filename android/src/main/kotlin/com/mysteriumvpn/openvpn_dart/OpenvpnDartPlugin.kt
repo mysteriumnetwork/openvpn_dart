@@ -112,7 +112,7 @@ class OpenvpnDartPlugin :
             "connect" -> {
                 val config = call.argument<String>("config")
                 if (config.isNullOrEmpty()) {
-                    result.error("-2", "Config is empty or nil", null)
+                    result.error("err_config_empty", "Config is empty or null", null)
                     return
                 }
                 ensurePermission { granted ->
@@ -126,7 +126,7 @@ class OpenvpnDartPlugin :
                             result.success(null)
                         } catch (e: Exception) {
                             Log.e(TAG, "connect failed", e)
-                            result.error("err_connect", e.message, null)
+                            result.error("err_connect", e.message ?: e.toString(), null)
                         }
                     }
                 }
