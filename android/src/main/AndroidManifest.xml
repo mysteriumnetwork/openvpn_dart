@@ -1,3 +1,9 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-  package="com.mysteriumvpn.openvpn_dart">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      The ics-openvpn AAR declares OpenVPNService (with BIND_VPN_SERVICE +
+      foregroundServiceType), OpenVPNStatusService, and all required permissions; they merge in
+      automatically. Our repackaged AAR also runs those services in the app's main process (no
+      ":openvpn" process) and no longer imposes an application icon/label/theme/name — so consuming
+      apps need no tools:replace or process overrides.
+    -->
 </manifest>

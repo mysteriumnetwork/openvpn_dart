@@ -1,9 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:openvpn_dart/vpn_status.dart';
+import 'package:openvpn_dart/vpn_statistics.dart';
 
+/// Entry point for controlling an OpenVPN connection.
+///
+/// Call [initialize] once before any other method, then [connect] / [disconnect]
+/// and observe progress via [statusStream] (or poll [getVPNStatus]). Live traffic
+/// counters are available from [tunnelStatistics].
+///
+/// Supported platforms: Android (ics-openvpn), iOS & macOS (NetworkExtension),
+/// Windows (bundled OpenVPN binaries). Methods that don't apply to a platform are
+/// no-ops or return gracefully there.
 class OpenVPNDart {
   ///Channel's names of _VPNStatusSnapshot
   static const String _eventChannelVPNStatus =
@@ -83,18 +94,15 @@ class OpenVPNDart {
     }
   }
 
-  ///Connect to VPN
+  /// Connect to the VPN.
   ///
-  ///config : Your openvpn configuration script, you can find it inside your .ovpn file
+  /// [config] : the full OpenVPN configuration (the contents of your `.ovpn` file).
+  /// Credentials are taken from an inline `<auth-user-pass>` block in [config];
+  /// there are no separate username/password parameters.
   ///
-  ///name : name that will show in user's notification
-  ///
-  ///certIsRequired : default is false, if your config file has cert, set it to true
-  ///
-  ///username & password : set your username and password if your config file has auth-user-pass
-  ///
-  ///bypassPackages : exclude some apps to access/use the VPN Connection,
-  /// it was List&lt;String&gt; of applications package's name (Android Only)
+  /// This resolves once the tunnel has been *requested to start*, NOT once it is
+  /// connected. Connection progress and failures (including auth failure) are
+  /// reported via [statusStream] / [getVPNStatus], not via this Future.
   Future<void> connect(String config) async {
     if (!initialized) {
       throw StateError("OpenVPN must be initialized before connecting");
@@ -126,6 +134,22 @@ class OpenVPNDart {
     return ConnectionStatus.fromString(status ?? "disconnected");
   }
 
+  /// Cumulative traffic statistics (bytes up/down) for the current session.
+  ///
+  /// Returns null if unavailable or not supported on the current platform.
+  /// (Implemented on Android via ics-openvpn's byte counters.)
+  Future<VPNStatistics?> tunnelStatistics() async {
+    try {
+      final result = await _channelControl.invokeMethod("tunnelStatistics");
+      if (result is! String) return null;
+      return VPNStatistics.fromJson(jsonDecode(result) as Map<String, dynamic>);
+    } on PlatformException {
+      return null; // method not implemented on this platform
+    } catch (_) {
+      return null;
+    }
+  }
+
   ///Request android permission (Return true if already granted)
   Future<bool> requestPermissionAndroid() async {
     return _channelControl
@@ -154,6 +178,11 @@ class OpenVPNDart {
     });
   }
 
+  /// Whether the VPN tunnel is already configured / permitted.
+  ///
+  /// iOS/macOS: whether a NetworkExtension tunnel configuration exists.
+  /// Android: whether the user has already granted VPN consent
+  /// (`VpnService.prepare` returns no prompt).
   Future<bool> checkTunnelConfiguration() async {
     try {
       final result =
@@ -164,6 +193,11 @@ class OpenVPNDart {
     }
   }
 
+  /// Remove the saved tunnel configuration.
+  ///
+  /// iOS/macOS: removes the NetworkExtension configuration. Android has no
+  /// persistent configuration, so this simply ensures any running tunnel is
+  /// stopped.
   Future<void> removeTunnelConfiguration() async {
     try {
       await _channelControl.invokeMethod("removeTunnelConfiguration");
@@ -172,6 +206,10 @@ class OpenVPNDart {
     }
   }
 
+  /// Prepare the tunnel before connecting.
+  ///
+  /// iOS/macOS: creates the NetworkExtension tunnel configuration.
+  /// Android: requests VPN consent (shows the system prompt if not yet granted).
   Future<void> setupTunnel() async {
     try {
       await _channelControl.invokeMethod("setupTunnel");
