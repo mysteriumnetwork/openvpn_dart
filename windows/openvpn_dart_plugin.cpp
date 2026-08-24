@@ -10,6 +10,7 @@
 #include <memory>
 #include <sstream>
 #include <fstream>
+#include <iterator>
 #include <filesystem>
 #include <regex>
 
@@ -836,26 +837,16 @@ namespace openvpn_dart
     else if (method == "tunnelStatistics")
     {
       // Returns OpenVPN's --status file verbatim; parsed on the Dart side.
-      if (status_file_path_.empty() || !std::filesystem::exists(status_file_path_))
-      {
-        result->Success(flutter::EncodableValue());
-        return;
-      }
+      // is_open() already covers a missing file, so no exists() pre-check.
       std::ifstream status_file(status_file_path_);
       if (!status_file.is_open())
       {
         result->Success(flutter::EncodableValue());
         return;
       }
-      std::stringstream buffer;
-      buffer << status_file.rdbuf();
-      const std::string contents = buffer.str();
-      if (contents.empty())
-      {
-        result->Success(flutter::EncodableValue());
-        return;
-      }
-      result->Success(flutter::EncodableValue(contents));
+      const std::string contents{std::istreambuf_iterator<char>(status_file),
+                                 std::istreambuf_iterator<char>()};
+      result->Success(contents.empty() ? flutter::EncodableValue() : flutter::EncodableValue(contents));
     }
     else if (method == "request_permission")
     {

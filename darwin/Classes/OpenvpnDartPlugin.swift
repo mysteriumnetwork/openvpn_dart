@@ -140,9 +140,7 @@ public class OpenvpnDartPlugin: NSObject, FlutterPlugin {
                 }
 
             case "tunnelStatistics":
-                OpenvpnDartPlugin.utils.tunnelStatistics { json in
-                    result(json)
-                }
+                OpenvpnDartPlugin.utils.tunnelStatistics { result($0) }
 
             case "status":
                 result(OpenvpnDartPlugin.utils.currentStatus())
@@ -336,29 +334,26 @@ class VPNUtils {
         // Both the reply and the timeout hop to the main queue, so this flag is
         // only ever touched there — a FlutterResult must not be called twice.
         var didRespond = false
+        // Cancelled as soon as a reply lands, so a consumed completion is not
+        // retained until the deadline on every poll.
+        var timeout: DispatchWorkItem?
         let respond: (String?) -> Void = { json in
             DispatchQueue.main.async {
                 guard !didRespond else { return }
                 didRespond = true
+                timeout?.cancel()
                 completion(json)
             }
         }
+        timeout = DispatchWorkItem { respond(nil) }
 
         do {
             try session.sendProviderMessage(Data("OPENVPN_STATS".utf8)) { response in
-                guard let response, let json = String(data: response, encoding: .utf8) else {
-                    respond(nil)
-                    return
-                }
-                respond(json)
+                respond(response.flatMap { String(data: $0, encoding: .utf8) })
             }
             // An extension that never replies would otherwise leave the Dart
             // future pending forever and stall the caller's poll loop.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                guard !didRespond else { return }
-                didRespond = true
-                completion(nil)
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: timeout!)
         } catch {
             os_log("[PLUGIN] tunnelStatistics failed: %@", error.localizedDescription)
             respond(nil)
