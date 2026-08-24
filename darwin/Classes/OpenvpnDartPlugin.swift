@@ -139,6 +139,9 @@ public class OpenvpnDartPlugin: NSObject, FlutterPlugin {
                     }
                 }
 
+            case "tunnelStatistics":
+                OpenvpnDartPlugin.utils.tunnelStatistics { result($0) }
+
             case "status":
                 result(OpenvpnDartPlugin.utils.currentStatus())
 
@@ -312,6 +315,52 @@ class VPNUtils {
                     }
                 }
             }
+        }
+    }
+
+    /// Asks the packet tunnel extension for its byte counters, answered as the
+    /// same JSON shape Android returns. Hands back nil when the tunnel is not
+    /// connected, the extension declines, or it never answers.
+    func tunnelStatistics(completion: @escaping (String?) -> Void) {
+        guard let session = providerManager?.connection as? NETunnelProviderSession else {
+            completion(nil)
+            return
+        }
+        guard session.status == .connected else {
+            completion(nil)
+            return
+        }
+
+        // Both the reply and the timeout hop to the main queue, so this flag is
+        // only ever touched there — a FlutterResult must not be called twice.
+        var didRespond = false
+        // Cancelled as soon as a reply lands, so a consumed completion is not
+        // retained until the deadline on every poll.
+        var timeout: DispatchWorkItem?
+        let respond: (String?) -> Void = { json in
+            DispatchQueue.main.async {
+                guard !didRespond else { return }
+                didRespond = true
+                // cancel() alone leaves the work item — and through it this
+                // closure and the completion — retained by the captured box,
+                // so drop the reference to break the cycle.
+                timeout?.cancel()
+                timeout = nil
+                completion(json)
+            }
+        }
+        timeout = DispatchWorkItem { respond(nil) }
+
+        do {
+            try session.sendProviderMessage(Data("OPENVPN_STATS".utf8)) { response in
+                respond(response.flatMap { String(data: $0, encoding: .utf8) })
+            }
+            // An extension that never replies would otherwise leave the Dart
+            // future pending forever and stall the caller's poll loop.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: timeout!)
+        } catch {
+            os_log("[PLUGIN] tunnelStatistics failed: %@", error.localizedDescription)
+            respond(nil)
         }
     }
 

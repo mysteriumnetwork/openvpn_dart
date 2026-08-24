@@ -19,10 +19,41 @@ class VPNStatistics {
   });
 
   factory VPNStatistics.fromJson(Map<String, dynamic> json) => VPNStatistics(
-        totalDownload: (json['totalDownload'] as num?)?.toInt() ?? 0,
-        totalUpload: (json['totalUpload'] as num?)?.toInt() ?? 0,
-        latestHandshake: (json['latestHandshake'] as num?)?.toInt() ?? 0,
-      );
+    totalDownload: (json['totalDownload'] as num?)?.toInt() ?? 0,
+    totalUpload: (json['totalUpload'] as num?)?.toInt() ?? 0,
+    latestHandshake: (json['latestHandshake'] as num?)?.toInt() ?? 0,
+  );
+
+  /// Parses OpenVPN's `--status` file (format version 1), as produced on Windows.
+  ///
+  /// Uses the `TCP/UDP` wire counters rather than `TUN/TAP`, which count plaintext
+  /// bytes before encryption and so would not line up with what the other
+  /// platforms report. Returns null when neither wire counter is present.
+  static VPNStatistics? fromStatusFile(String status) {
+    int? totalDownload;
+    int? totalUpload;
+
+    for (final rawLine in status.split('\n')) {
+      final parts = rawLine.trim().split(',');
+      if (parts.length < 2) {
+        continue;
+      }
+      final value = int.tryParse(parts[1]);
+      if (value == null) {
+        continue;
+      }
+      if (parts[0] == 'TCP/UDP read bytes') {
+        totalDownload = value;
+      } else if (parts[0] == 'TCP/UDP write bytes') {
+        totalUpload = value;
+      }
+    }
+
+    if (totalDownload == null && totalUpload == null) {
+      return null;
+    }
+    return VPNStatistics(totalDownload: totalDownload ?? 0, totalUpload: totalUpload ?? 0);
+  }
 
   @override
   bool operator ==(Object other) =>

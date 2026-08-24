@@ -91,6 +91,8 @@ namespace openvpn_dart
         std::string openvpn_executable_path_;
         std::string bundled_path_;
         std::string log_file_path_;
+        // OpenVPN's --status output, polled by tunnelStatistics.
+        std::string status_file_path_;
     };
 
 } // namespace openvpn_dart
