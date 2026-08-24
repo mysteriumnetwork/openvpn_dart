@@ -2,6 +2,20 @@
 
 A Flutter plugin for OpenVPN connectivity with built-in Windows support. Connect to OpenVPN servers directly from your Flutter app without requiring users to install OpenVPN separately.
 
+## Platform support
+
+| | Android | iOS | macOS | Windows |
+| --- | --- | --- | --- | --- |
+| **Minimum version** | API 21 | 15.0 | 12.0 | 10 |
+| **Engine** | ics-openvpn (bundled AAR) | OpenVPNAdapter / OpenVPN3 | OpenVPNAdapter / OpenVPN3 | bundled `openvpn.exe` |
+| Connect / disconnect | ✅ | ✅ | ✅ | ✅ |
+| Status stream | ✅ | ✅ | ✅ | ✅ |
+| Tunnel configuration check / removal | ✅ | ✅ | ✅ | ✅ |
+| Tunnel statistics | ✅ | ✅ | ✅ | ✅ |
+| TAP driver bootstrap | n/a | n/a | n/a | ✅ |
+
+Linux is not supported.
+
 ## Features
 
 ✅ **Full OpenVPN Protocol Support**
@@ -26,6 +40,11 @@ A Flutter plugin for OpenVPN connectivity with built-in Windows support. Connect
 - Monitor connection progress
 - Handle connection errors gracefully
 
+✅ **Tunnel Statistics**
+- Cumulative session byte counters on every supported platform
+- One normalised `VPNStatistics` type regardless of how the platform reports them
+- See [Tunnel statistics](#tunnel-statistics) for the per-platform mechanics
+
 ✅ **Easy Integration**
 - Simple API
 - Minimal configuration
@@ -33,17 +52,23 @@ A Flutter plugin for OpenVPN connectivity with built-in Windows support. Connect
 
 ## Installation
 
-Add this to your package's `pubspec.yaml` file:
+The plugin is not published to pub.dev. Depend on a tagged ref:
 
 ```yaml
 dependencies:
-  openvpn_dart: ^1.0.0
+  openvpn_dart:
+    git:
+      url: https://github.com/mysteriumnetwork/openvpn_dart.git
+      ref: 0.0.9
 ```
 
 Then run:
 ```bash
 flutter pub get
 ```
+
+The Flutter SDK version is pinned **exactly** (`environment: flutter: 3.44.7`), so a consuming app
+must build on that version. It is also recorded in `.fvmrc` for [FVM](https://fvm.app).
 
 ### Windows Setup
 
@@ -485,6 +510,35 @@ Enum values (see [lib/vpn_status.dart](lib/vpn_status.dart)):
 - `ConnectionStatus.disconnected` - Not connected
 - `ConnectionStatus.unknown` - Indeterminate / unrecognized state
 
+## Tunnel statistics
+
+`tunnelStatistics()` returns `VPNStatistics?` — `totalDownload` (bytes received), `totalUpload`
+(bytes sent) and `latestHandshake`, which is **always 0**: OpenVPN has no handshake equivalent, and
+the field exists only so the shape matches `wireguard_dart`'s `TunnelStatistics`.
+
+Counters are cumulative for the current session and reset on each connect. All platforms report
+**wire** bytes (post-encryption, as seen on the transport), never plaintext tunnel bytes, so the
+numbers are comparable across platforms:
+
+| Platform | Source | Wire format |
+| --- | --- | --- |
+| Android | ics-openvpn `ByteCountListener` (`inBytes` / `outBytes`) | JSON |
+| iOS / macOS | `OpenVPNAdapter.interfaceStatistics` via an `OPENVPN_STATS` app message | JSON |
+| Windows | OpenVPN's `--status` file (`TCP/UDP read/write bytes`) | status text |
+
+Notes worth knowing:
+
+- **iOS/macOS requires host cooperation.** The packet-tunnel extension must answer the
+  `OPENVPN_STATS` app message; see [iOS/macOS Setup](#iosmacos) and the example extensions. An
+  extension that ignores the message makes every call return `null`.
+- **Windows updates in steps.** The status file is rewritten every 5 seconds, so polling faster
+  than that returns the same counters repeatedly — a derived rate will move in bursts.
+- **Contract.** Anything the platform cannot answer — not connected, no implementation, a native
+  error — comes back as `null` rather than throwing.
+- **Windows sessions are isolated.** The status file is deleted when a session starts and reads are
+  refused while no tunnel is running, so a disconnected call cannot return the previous session's
+  counters.
+
 ## Platform-Specific Notes
 
 ### Windows
@@ -508,6 +562,9 @@ Enum values (see [lib/vpn_status.dart](lib/vpn_status.dart)):
 - Network Extension capability
 - VPN entitlements in your app
 - Keychain access for storing credentials
+- For `tunnelStatistics()`: the packet-tunnel extension must answer the `OPENVPN_STATS` app message
+  with `{"totalDownload":N,"totalUpload":N,"latestHandshake":0}` — copy the example extensions
+  (`example/ios/VPNExtension`, `example/macos/VPNMExtension`)
 
 ### Android
 
@@ -592,6 +649,31 @@ _vpn.statusStream().listen((status) async {
    ```bash
    signtool sign /f certificate.pfx /p password /t http://timestamp.digicert.com your_app.exe
    ```
+
+## Development
+
+All commands go through [FVM](https://fvm.app) so they use the pinned SDK. The `Makefile` wraps
+the common ones:
+
+```bash
+make init      # flutter pub get
+make analyze   # flutter analyze
+make test      # flutter test
+make check     # format + analyze + test, as CI runs it
+```
+
+The Dart test suite covers the public API contract against a mocked method channel (including which
+failures surface as `StateError` / `ArgumentError` / `Exception`), the status-stream mapping and its
+de-duplication, the `--status` file parser, and the models. Native code has no test target, so
+Swift and C++ changes are verified by building the example:
+
+```bash
+cd example && flutter build ios --simulator --debug   # compiles the darwin plugin + VPNExtension
+cd example && flutter build windows --debug           # compiles the Windows plugin
+```
+
+CI runs `pub get`, `flutter analyze` and `flutter test` on every PR, installing the SDK from
+`.fvmrc` so it matches the exact pin in `pubspec.yaml`.
 
 ## License
 
