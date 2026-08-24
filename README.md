@@ -463,7 +463,10 @@ Future<String> loadConfigFromAPI() async {
 
 **`tunnelStatistics()`**
 - Returns `Future<VPNStatistics?>` — cumulative session traffic (`totalDownload`, `totalUpload`,
-  `latestHandshake`). `null` if unavailable / unsupported on the platform. (Implemented on Android.)
+  `latestHandshake`). `null` if unavailable / unsupported on the platform. Implemented on Android,
+  iOS, macOS and Windows; `latestHandshake` is always 0, as OpenVPN has no handshake.
+- On iOS/macOS the packet-tunnel extension must answer an `OPENVPN_STATS` app message with
+  `{"totalDownload":N,"totalUpload":N,"latestHandshake":0}` — see the example extensions.
 
 **`setupTunnel()` / `checkTunnelConfiguration()` / `removeTunnelConfiguration()`**
 - Prepare / query / remove the tunnel configuration. On iOS/macOS these manage the

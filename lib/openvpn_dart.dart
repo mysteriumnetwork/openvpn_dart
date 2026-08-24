@@ -132,7 +132,9 @@ class OpenVPNDart {
   /// Cumulative traffic statistics (bytes up/down) for the current session.
   ///
   /// Returns null if unavailable or not supported on the current platform.
-  /// (Implemented on Android via ics-openvpn's byte counters.)
+  /// Implemented on Android (ics-openvpn byte counters), iOS and macOS (the
+  /// packet-tunnel extension's interface statistics) and Windows (OpenVPN's
+  /// `--status` file). `latestHandshake` is always 0 — OpenVPN has no handshake.
   Future<VPNStatistics?> tunnelStatistics() async {
     try {
       final result = await _channelControl.invokeMethod("tunnelStatistics");

@@ -837,6 +837,13 @@ namespace openvpn_dart
     else if (method == "tunnelStatistics")
     {
       // Returns OpenVPN's --status file verbatim; parsed on the Dart side.
+      // Guarded on a live process: the file outlives a session, so reading it
+      // while disconnected would report the previous session's counters.
+      if (!IsVPNRunning())
+      {
+        result->Success(flutter::EncodableValue());
+        return;
+      }
       // is_open() already covers a missing file, so no exists() pre-check.
       std::ifstream status_file(status_file_path_);
       if (!status_file.is_open())
@@ -951,6 +958,10 @@ namespace openvpn_dart
     config_file_path_ = (temp_dir / "client.ovpn").string();
     log_file_path_ = (temp_dir / "openvpn.log").string();
     status_file_path_ = (temp_dir / "openvpn-status.log").string();
+    // openvpn.exe leaves its status file behind, so drop the previous session's
+    // counters before this one starts writing.
+    std::error_code status_remove_error;
+    std::filesystem::remove(status_file_path_, status_remove_error);
 
     // Write config to file with error handling
     try
@@ -1521,8 +1532,10 @@ namespace openvpn_dart
   {
     OutputDebugStringA("Checking for existing OpenVPN connection...");
 
-    // Set up log file path
+    // Set up log and status file paths — same directory StartVPN writes them to,
+    // so tunnelStatistics keeps working after attaching to an existing process.
     log_file_path_ = bundled_path_ + "\\config\\openvpn.log";
+    status_file_path_ = bundled_path_ + "\\config\\openvpn-status.log";
 
     // Check if log file exists and has recent "Initialization Sequence Completed" message
     if (std::filesystem::exists(log_file_path_))

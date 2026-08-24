@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **Tunnel statistics beyond Android.** `tunnelStatistics()` now works on iOS/macOS (the
+  packet-tunnel extension answers an `OPENVPN_STATS` app message with the same JSON shape Android
+  returns) and on Windows (OpenVPN writes a `--status` file, parsed in Dart via
+  `VPNStatistics.fromStatusFile`). Host apps must forward `handleAppMessage` as the example
+  extensions do. The Windows status file refreshes every 5s, so counters there step rather than
+  stream. `latestHandshake` stays 0 on every platform — OpenVPN has no handshake.
 - **Android support** via the ics-openvpn engine, bundled as a from-source AAR
   (`network.mysterium.openvpn:icsopenvpn`, built from `schwabe/ics-openvpn` v0.7.55 with current
   OpenSSL 3.4.1 / OpenVPN 2.7). See [`android/localmaven/PROVENANCE.md`](android/localmaven/PROVENANCE.md).

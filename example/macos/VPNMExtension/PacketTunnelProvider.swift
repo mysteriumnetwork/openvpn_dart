@@ -98,20 +98,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
     
     override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
-        if String(data: messageData, encoding: .utf8) == "OPENVPN_STATS" {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            
-            let statsString =
-                "\(UserDefaults.standard.string(forKey: "connected_on") ?? "")_" +
-                "\(vpnAdapter.interfaceStatistics.packetsIn)_" +
-                "\(vpnAdapter.interfaceStatistics.packetsOut)_" +
-                "\(vpnAdapter.interfaceStatistics.bytesIn)_" +
-                "\(vpnAdapter.interfaceStatistics.bytesOut)"
-            
-            os_log("[VPN] Updating connection stats: %@", log: PacketTunnelProvider.vpnLog, type: .info, statsString)
-            UserDefaults.standard.setValue(statsString, forKey: "connectionUpdate")
+        guard let completionHandler else { return }
+        guard String(data: messageData, encoding: .utf8) == "OPENVPN_STATS" else {
+            completionHandler(nil)
+            return
         }
+
+        // The plugin's `tunnelStatistics()` parses this reply, so the shape has to
+        // match what Android returns. OpenVPN has no handshake equivalent.
+        let stats = vpnAdapter.interfaceStatistics
+        let json = "{\"totalDownload\":\(stats.bytesIn),\"totalUpload\":\(stats.bytesOut),\"latestHandshake\":0}"
+        os_log("[VPN] Reporting connection stats: %@", log: PacketTunnelProvider.vpnLog, type: .debug, json)
+        completionHandler(json.data(using: .utf8))
     }
 }
 
