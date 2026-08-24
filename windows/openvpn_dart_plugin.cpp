@@ -833,6 +833,30 @@ namespace openvpn_dart
       std::string status = GetCurrentStatus();
       result->Success(flutter::EncodableValue(status));
     }
+    else if (method == "tunnelStatistics")
+    {
+      // Returns OpenVPN's --status file verbatim; parsed on the Dart side.
+      if (status_file_path_.empty() || !std::filesystem::exists(status_file_path_))
+      {
+        result->Success(flutter::EncodableValue());
+        return;
+      }
+      std::ifstream status_file(status_file_path_);
+      if (!status_file.is_open())
+      {
+        result->Success(flutter::EncodableValue());
+        return;
+      }
+      std::stringstream buffer;
+      buffer << status_file.rdbuf();
+      const std::string contents = buffer.str();
+      if (contents.empty())
+      {
+        result->Success(flutter::EncodableValue());
+        return;
+      }
+      result->Success(flutter::EncodableValue(contents));
+    }
     else if (method == "request_permission")
     {
       result->Success(flutter::EncodableValue(true));
@@ -935,6 +959,7 @@ namespace openvpn_dart
 
     config_file_path_ = (temp_dir / "client.ovpn").string();
     log_file_path_ = (temp_dir / "openvpn.log").string();
+    status_file_path_ = (temp_dir / "openvpn-status.log").string();
 
     // Write config to file with error handling
     try
@@ -997,6 +1022,8 @@ namespace openvpn_dart
     std::string command_line = "\"" + openvpn_executable_path_ + "\"";
     command_line += " --config \"" + config_file_path_ + "\"";
     command_line += " --log \"" + log_file_path_ + "\"";
+    // Byte counters for tunnelStatistics; refreshed on this interval (seconds).
+    command_line += " --status \"" + status_file_path_ + "\" 5";
     command_line += " --verb 3";
     command_line += " --route-method exe"; // Use external routing method for Windows
     command_line += " --route-delay 2";    // Give Windows time to set up routes
