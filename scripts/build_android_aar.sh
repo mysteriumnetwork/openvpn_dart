@@ -65,14 +65,17 @@ AAR_SRC="$SRC/main/build/outputs/aar/main-skeleton-ovpn23-release.aar"
 
 # --- Verify --------------------------------------------------------------------------------------
 echo "==> Verifying AAR…"
+# List once into a variable: `unzip -l | grep -q` dies with SIGPIPE (141) under `set -o pipefail`,
+# because grep -q closes the pipe on its first match. -F so the `.` in a filename is not a wildcard.
+AAR_LIST="$(unzip -l "$AAR_SRC")"
 for abi in arm64-v8a armeabi-v7a x86 x86_64; do
   # libovpnexec.so is the binary ics actually execs (needs useLegacyPackaging on the consumer);
   # libopenvpn.so is the engine. Verify both per ABI.
   for lib in libopenvpn.so libovpnexec.so; do
-    unzip -l "$AAR_SRC" | grep -q "jni/${abi}/${lib}" || { echo "ERROR: missing ${abi}/${lib}"; exit 1; }
+    grep -qF "jni/${abi}/${lib}" <<<"$AAR_LIST" || { echo "ERROR: missing ${abi}/${lib}"; exit 1; }
   done
 done
-unzip -l "$AAR_SRC" | grep -q "ic_launcher" && { echo "ERROR: launcher resources leaked into AAR"; exit 1; }
+grep -qF "ic_launcher" <<<"$AAR_LIST" && { echo "ERROR: launcher resources leaked into AAR"; exit 1; }
 echo "    ABIs present, no launcher leak."
 
 # --- Stage into localmaven -----------------------------------------------------------------------

@@ -392,11 +392,100 @@ index ab8654b..3fa2f5f 100644
  
      </application>
  
+diff --git a/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java b/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java
+index a5e32d6..8bce3d6 100644
+--- a/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java
++++ b/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java
+@@ -5,14 +5,10 @@
+ 
+ package de.blinkt.openvpn.core;
+ 
+-import android.annotation.TargetApi;
+ import android.app.Application;
+-import android.app.NotificationChannel;
+-import android.app.NotificationManager;
+ import android.content.Context;
+ import android.content.SharedPreferences;
+ import android.content.res.Configuration;
+-import android.graphics.Color;
+ import android.os.Build;
+ 
+ import android.os.StrictMode;
+@@ -42,7 +38,7 @@ public class ICSOpenVPNApplication extends Application {
+         super.onCreate();
+ 
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+-            createNotificationChannels();
++            OpenVPNService.createNotificationChannels(this);
+         mStatus = new StatusListener();
+         mStatus.init(getApplicationContext());
+ 
+@@ -104,42 +100,6 @@ public class ICSOpenVPNApplication extends Application {
+         VpnStatus.logException(VpnStatus.LogLevel.DEBUG, null, v);
+     }
+ 
+-    @TargetApi(Build.VERSION_CODES.O)
+-    private void createNotificationChannels() {
+-        NotificationManager mNotificationManager =
+-                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+-
+-        // Background message
+-        CharSequence name = getString(R.string.channel_name_background);
+-        NotificationChannel mChannel = new NotificationChannel(OpenVPNService.NOTIFICATION_CHANNEL_BG_ID,
+-                name, NotificationManager.IMPORTANCE_MIN);
+-
+-        mChannel.setDescription(getString(R.string.channel_description_background));
+-        mChannel.enableLights(false);
+-
+-        mChannel.setLightColor(Color.DKGRAY);
+-        mNotificationManager.createNotificationChannel(mChannel);
+-
+-        // Connection status change messages
+-
+-        name = getString(R.string.channel_name_status);
+-        mChannel = new NotificationChannel(OpenVPNService.NOTIFICATION_CHANNEL_NEWSTATUS_ID,
+-                name, NotificationManager.IMPORTANCE_LOW);
+-
+-        mChannel.setDescription(getString(R.string.channel_description_status));
+-        mChannel.enableLights(true);
+-
+-        mChannel.setLightColor(Color.BLUE);
+-        mNotificationManager.createNotificationChannel(mChannel);
+-
+-
+-        // Urgent requests, e.g. two factor auth
+-        name = getString(R.string.channel_name_userreq);
+-        mChannel = new NotificationChannel(OpenVPNService.NOTIFICATION_CHANNEL_USERREQ_ID,
+-                name, NotificationManager.IMPORTANCE_HIGH);
+-        mChannel.setDescription(getString(R.string.channel_description_userreq));
+-        mChannel.enableVibration(true);
+-        mChannel.setLightColor(Color.CYAN);
+-        mNotificationManager.createNotificationChannel(mChannel);
+-    }
++    // MYSTERIUM: moved to OpenVPNService.createNotificationChannels(Context) so the service
++    // creates its own channels regardless of whether this Application class is installed.
+ }
 diff --git a/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java b/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java
-index 4df6aa1..5003465 100644
+index 4df6aa1..f2396a5 100644
 --- a/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java
 +++ b/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java
-@@ -428,19 +428,8 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+@@ -15,6 +15,7 @@ import static de.blinkt.openvpn.core.NetworkSpace.IpAddress;
+ import android.Manifest.permission;
+ import android.annotation.TargetApi;
+ import android.app.Notification;
++import android.app.NotificationChannel;
+ import android.app.NotificationManager;
+ import android.app.PendingIntent;
+ import android.app.UiModeManager;
+@@ -27,6 +28,7 @@ import android.content.pm.PackageManager;
+ import android.content.pm.ShortcutManager;
+ import android.content.res.Configuration;
+ import android.content.res.Resources;
++import android.graphics.Color;
+ import android.net.ConnectivityManager;
+ import android.net.ProxyInfo;
+ import android.net.Uri;
+@@ -428,19 +430,8 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
          nbuilder.addAction(R.drawable.ic_menu_close_clear_cancel,
                  getString(R.string.cancel_connection), disconnectPendingIntent);
  
@@ -418,7 +507,7 @@ index 4df6aa1..5003465 100644
      }
  
      PendingIntent getUserInputIntent(String needed) {
-@@ -454,18 +443,20 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+@@ -454,18 +445,20 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
      }
  
      PendingIntent getGraphPendingIntent() {
@@ -451,6 +540,85 @@ index 4df6aa1..5003465 100644
      }
  
      synchronized void registerDeviceStateReceiver(DeviceStateReceiver newDeviceStateReceiver) {
+@@ -671,7 +664,11 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+         mProfile = vp;
+         ProfileManager.setConnectedVpnProfile(this, vp);
+         VpnStatus.setConnectedVPNProfile(vp.getUUIDString());
+-        keepVPNAlive.scheduleKeepVPNAliveJobService(this, vp);
++        // MYSTERIUM: do NOT schedule the keepalive job. It restarted the tunnel ~15 min after the
++        // app process died, from a process with no Flutter engine — so no Dart state ran and none
++        // of the app's entitlement/session handling applied. Tunnels must only come up from an
++        // app-initiated connect. endVpnService() and onCreate() still unschedule, which also clears
++        // a job left pending by an older build of this AAR.
+ 
+         String nativeLibraryDirectory = getApplicationInfo().nativeLibraryDir;
+         String tmpDir;
+@@ -799,12 +796,65 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+     @Override
+     public void onCreate() {
+         super.onCreate();
++        // MYSTERIUM: ICSOpenVPNApplication normally creates these channels, but this AAR strips its
++        // android:name so the host app keeps its own Application class. The service can be started
++        // with no host-app init having run at all (Always-on VPN, a stale keepalive job), and posting
++        // the foreground notification on a channel that does not exist gets the process killed with
++        // CannotPostForegroundServiceNotificationException. Creating them here makes that impossible
++        // from any entry point.
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
++            createNotificationChannels(this);
++        // MYSTERIUM: clears a keepalive job left pending by an older build of this AAR.
++        keepVPNAlive.unscheduleKeepVPNAliveJobService(this);
+         guiHandler = new Handler(getMainLooper());
+         mCommandHandlerThread = new HandlerThread("OpenVPNServiceCommandThread");
+         mCommandHandlerThread.start();
+         mCommandHandler = new Handler(mCommandHandlerThread.getLooper());
+     }
+ 
++    /**
++     * MYSTERIUM: moved here from ICSOpenVPNApplication, which this AAR no longer installs as the
++     * host app's Application class. The channels these notifications post on belong with the
++     * service that posts them, so every entry point gets them for free. Called from
++     * {@link #onCreate()} and from ICSOpenVPNApplication for the standalone app.
++     */
++    @TargetApi(Build.VERSION_CODES.O)
++    static void createNotificationChannels(Context context) {
++        NotificationManager mNotificationManager =
++                (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
++
++        // Background message
++        CharSequence name = context.getString(R.string.channel_name_background);
++        NotificationChannel mChannel = new NotificationChannel(NOTIFICATION_CHANNEL_BG_ID,
++                name, NotificationManager.IMPORTANCE_MIN);
++
++        mChannel.setDescription(context.getString(R.string.channel_description_background));
++        mChannel.enableLights(false);
++
++        mChannel.setLightColor(Color.DKGRAY);
++        mNotificationManager.createNotificationChannel(mChannel);
++
++        // Connection status change messages
++        name = context.getString(R.string.channel_name_status);
++        mChannel = new NotificationChannel(NOTIFICATION_CHANNEL_NEWSTATUS_ID,
++                name, NotificationManager.IMPORTANCE_LOW);
++
++        mChannel.setDescription(context.getString(R.string.channel_description_status));
++        mChannel.enableLights(true);
++
++        mChannel.setLightColor(Color.BLUE);
++        mNotificationManager.createNotificationChannel(mChannel);
++
++        // Urgent requests, e.g. two factor auth
++        name = context.getString(R.string.channel_name_userreq);
++        mChannel = new NotificationChannel(NOTIFICATION_CHANNEL_USERREQ_ID,
++                name, NotificationManager.IMPORTANCE_HIGH);
++        mChannel.setDescription(context.getString(R.string.channel_description_userreq));
++        mChannel.enableVibration(true);
++        mChannel.setLightColor(Color.CYAN);
++        mNotificationManager.createNotificationChannel(mChannel);
++    }
++
+     @Override
+     public void onDestroy() {
+         synchronized (mProcessLock) {
 diff --git a/main/src/main/java/de/blinkt/openvpn/core/keepVPNAlive.java b/main/src/main/java/de/blinkt/openvpn/core/keepVPNAlive.java
 index 130dc68..19580f2 100644
 --- a/main/src/main/java/de/blinkt/openvpn/core/keepVPNAlive.java

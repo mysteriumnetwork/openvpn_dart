@@ -1,13 +1,10 @@
 package com.mysteriumvpn.openvpn_dart
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.net.VpnService
-import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import de.blinkt.openvpn.VpnProfile
@@ -43,15 +40,10 @@ object OpenVPNBackend : VpnStatus.StateListener, VpnStatus.ByteCountListener {
     @Volatile private var totalDownload: Long = 0
     @Volatile private var totalUpload: Long = 0
 
-    /** Idempotent. Creates notification channels and registers the status listener once. */
+    /** Idempotent. Registers the status listeners once. */
     fun init(context: Context) {
         if (initialized) return
         appContext = context.applicationContext
-        // ICSOpenVPNApplication normally creates these channels, but the host app keeps its own
-        // Application class, so we do it here — otherwise OpenVPNService.startForeground() throws
-        // CannotPostForegroundServiceNotificationException. (OpenVPNService runs in the app process
-        // per our manifest, so status reaches this listener directly — no cross-process bridge.)
-        createNotificationChannels(appContext)
         VpnStatus.addStateListener(this)
         VpnStatus.addByteCountListener(this)
         initialized = true
@@ -66,30 +58,6 @@ object OpenVPNBackend : VpnStatus.StateListener, VpnStatus.ByteCountListener {
 
     /** Latest cumulative byte counts for the current session: download (rx) and upload (tx). */
     fun statistics(): Pair<Long, Long> = Pair(totalDownload, totalUpload)
-
-    /** Mirrors ICSOpenVPNApplication.createNotificationChannels using ics-openvpn's channel IDs. */
-    private fun createNotificationChannels(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.createNotificationChannel(
-            NotificationChannel(
-                OpenVPNService.NOTIFICATION_CHANNEL_BG_ID, "VPN connection",
-                NotificationManager.IMPORTANCE_MIN,
-            )
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(
-                OpenVPNService.NOTIFICATION_CHANNEL_NEWSTATUS_ID, "VPN status",
-                NotificationManager.IMPORTANCE_LOW,
-            )
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(
-                OpenVPNService.NOTIFICATION_CHANNEL_USERREQ_ID, "VPN requests",
-                NotificationManager.IMPORTANCE_HIGH,
-            )
-        )
-    }
 
     // --- VpnStatus.StateListener ---
     override fun updateState(

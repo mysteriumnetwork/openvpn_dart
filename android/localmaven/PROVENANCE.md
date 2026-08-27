@@ -8,7 +8,7 @@ an opaque third-party prebuilt. This file is the audit trail.
 - **File:** `android/localmaven/network/mysterium/openvpn/icsopenvpn/0.7.55-myst/icsopenvpn-0.7.55-myst.aar`
 - **Coordinate:** `network.mysterium.openvpn:icsopenvpn:0.7.55-myst`
 - **Size:** ~33 MB
-- **SHA-256:** `1da7a6068d0bda22fef4b8ec7a887c07ab456e65c1246ea9a7533c4676891454`
+- **SHA-256:** `af7cdc5529ba248c9057abd2e8c7a87f28f1077f963bb9c9a9fff093d44f7580`
 - **Gradle variant built:** `:main:assembleSkeletonOvpn23Release`
   - `skeleton` flavor = VPN core engine **without** the ics-openvpn UI.
   - `ovpn23` flavor = OpenVPN3 C++ engine + OpenSSL.
@@ -26,10 +26,28 @@ WireGuard notification (no functional/crypto change to the engine):
   the host app's launcher activity instead of ics's stripped `.activities.MainActivity` (which
   doesn't exist in the consumer app), so tapping the notification brings the app to the front /
   relaunches it.
-- `keepVPNAlive` schedules a **non-persisted** JobScheduler job
-  (`setPersisted(false)`). The persisted variant requires `RECEIVE_BOOT_COMPLETED` (removed above
-  for hardening), and its absence crashed `startOpenVPN` on connect. Non-persisted is consistent
-  with the removed boot auto-start; in-session keepalive is unaffected.
+- **`keepVPNAlive` is never scheduled.** `startOpenVPN` no longer calls
+  `scheduleKeepVPNAliveJobService`. That periodic job restarted the tunnel ~15 min after the app
+  process died, from a process with no Flutter engine — so no Dart state ran and none of the app's
+  entitlement/session handling applied (a tunnel could come back up for a lapsed subscription and
+  keep running until the app was next opened). Tunnels now only come up from an app-initiated
+  connect. `endVpnService()` and `OpenVPNService.onCreate()` still call
+  `unscheduleKeepVPNAliveJobService`, which also clears a job left pending by an earlier build.
+  The class and its `BIND_JOB_SERVICE`-protected manifest entry are kept, so nothing can throw
+  `IllegalArgumentException` for an undeclared job component.
+  (Supersedes an earlier build that only changed this job to `setPersisted(false)`, because the persisted
+  variant requires `RECEIVE_BOOT_COMPLETED` — removed above for hardening — and its absence crashed
+  `startOpenVPN` on connect.)
+- **Notification channels are created by `OpenVPNService`, not the `Application`.**
+  `createNotificationChannels` moved from `ICSOpenVPNApplication` to
+  `OpenVPNService.createNotificationChannels(Context)` and is called from `OpenVPNService.onCreate()`
+  (`ICSOpenVPNApplication` now delegates to it, so the standalone app is unchanged). Because this AAR
+  strips the application `android:name`, the host app keeps its own `Application` class and the
+  channels were never created — and `OpenVPNService` can start with no host-app init at all
+  (Always-on VPN, a stale keepalive job), where `startForeground()` on a nonexistent channel gets the
+  process killed with `CannotPostForegroundServiceNotificationException`. Creating them in the
+  service makes that impossible from any entry point. Channel names/descriptions still come from the
+  upstream string resources, so they stay localized.
 - **Security hardening:** removed permissions and exported components that the headless
   connect flow never uses and that are unsafe for a consumer VPN app:
   - permissions: `QUERY_ALL_PACKAGES` (Play-restricted), `READ_EXTERNAL_STORAGE`,
