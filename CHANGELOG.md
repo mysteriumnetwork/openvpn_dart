@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+- **Android: a `.ovpn` with no client-auth directive crashed the host app process on connect.**
+  `connect()` now rejects such a config with `err_connect`, and the bundled AAR fails it as an
+  ordinary keystore error instead of `NullPointerException: alias == null` — which also covers the
+  system-initiated service restart, a path `connect()` never sees.
+- **Android: `ForegroundServiceDidNotStartInTimeException` on connect.** `OpenVPNService` now always
+  posts its foreground notification in `onStartCommand` instead of skipping it whenever the host app
+  had a notification on screen.
+- **Android: `ActivityNotFoundException` from `LaunchVPN`.** It no longer tries to open ics's log
+  window, which cannot exist under a host app's package.
+
+  AAR-side detail for all three: [`android/localmaven/PROVENANCE.md`](android/localmaven/PROVENANCE.md).
+
 ### Added
 - **Tunnel statistics beyond Android.** `tunnelStatistics()` now works on iOS/macOS (the
   packet-tunnel extension answers an `OPENVPN_STATS` app message with the same JSON shape Android
