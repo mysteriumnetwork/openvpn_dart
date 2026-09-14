@@ -392,6 +392,50 @@ index ab8654b..3fa2f5f 100644
  
      </application>
  
+diff --git a/main/src/main/java/de/blinkt/openvpn/LaunchVPN.java b/main/src/main/java/de/blinkt/openvpn/LaunchVPN.java
+index 4ad5e5b..0f4d8a7 100644
+--- a/main/src/main/java/de/blinkt/openvpn/LaunchVPN.java
++++ b/main/src/main/java/de/blinkt/openvpn/LaunchVPN.java
+@@ -271,12 +271,12 @@ public class LaunchVPN extends Activity {
+     }
+ 
+     void showLogWindow() {
+-
+-        Intent startLW = new Intent();
+-        startLW.setComponent(new ComponentName(this, getPackageName() + ".activities.LogWindow"));
+-        startLW.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+-        startActivity(startLW);
+-
++        /* MYSTERIUM: no-op. This started "<host app package>.activities.LogWindow", which only
++         * exists when ics-openvpn IS the app — under a host app it threw ActivityNotFoundException
++         * out of onCreate()/onActivityResult() and took the app down (and on the off chance the
++         * host app does define that name, it would have opened an unrelated activity). The log
++         * window is stripped from this build, so there is nothing to show. */
++        VpnStatus.logInfo("No log window in this build, not showing the log");
+     }
+ 
+     void showConfigErrorDialog(int vpnok) {
+diff --git a/main/src/main/java/de/blinkt/openvpn/VpnProfile.java b/main/src/main/java/de/blinkt/openvpn/VpnProfile.java
+index df1333d..7295fc4 100644
+--- a/main/src/main/java/de/blinkt/openvpn/VpnProfile.java
++++ b/main/src/main/java/de/blinkt/openvpn/VpnProfile.java
+@@ -896,6 +896,16 @@ public class VpnProfile implements Serializable, Cloneable {
+     }
+ 
+     private X509Certificate[] getKeyStoreCertificates(Context context) throws KeyChainException, InterruptedException {
++        /* MYSTERIUM: mAuthenticationType defaults to TYPE_KEYSTORE and ConfigParser only moves it
++         * off that default when the config carries a client-auth directive, so an auth-less or
++         * unparseable config produces a keystore profile with no alias. KeyChain then throws
++         * NullPointerException("alias == null") on the service command thread (getConfigFile) or on
++         * the checkForRestart thread, neither of which is caught -> the whole host app process dies.
++         * Fail as an ordinary keystore error instead: getExternalCertificates() catches
++         * KeyChainException, logs it and returns null. */
++        if (mAlias == null)
++            throw new KeyChainException("No keystore certificate alias set for this profile");
++
+         mPrivateKey = KeyChain.getPrivateKey(context, mAlias);
+ 
+ 
 diff --git a/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java b/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java
 index a5e32d6..8bce3d6 100644
 --- a/main/src/main/java/de/blinkt/openvpn/core/ICSOpenVPNApplication.java
@@ -466,7 +510,7 @@ index a5e32d6..8bce3d6 100644
 +    // creates its own channels regardless of whether this Application class is installed.
  }
 diff --git a/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java b/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java
-index 4df6aa1..f2396a5 100644
+index 4df6aa1..289a431 100644
 --- a/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java
 +++ b/main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java
 @@ -15,6 +15,7 @@ import static de.blinkt.openvpn.core.NetworkSpace.IpAddress;
@@ -485,7 +529,15 @@ index 4df6aa1..f2396a5 100644
  import android.net.ConnectivityManager;
  import android.net.ProxyInfo;
  import android.net.Uri;
-@@ -428,19 +430,8 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+@@ -40,7 +42,6 @@ import android.os.IBinder;
+ import android.os.Message;
+ import android.os.ParcelFileDescriptor;
+ import android.os.RemoteException;
+-import android.service.notification.StatusBarNotification;
+ import android.system.OsConstants;
+ import android.text.TextUtils;
+ import android.util.Base64;
+@@ -428,19 +429,8 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
          nbuilder.addAction(R.drawable.ic_menu_close_clear_cancel,
                  getString(R.string.cancel_connection), disconnectPendingIntent);
  
@@ -507,7 +559,7 @@ index 4df6aa1..f2396a5 100644
      }
  
      PendingIntent getUserInputIntent(String needed) {
-@@ -454,18 +445,20 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+@@ -454,18 +444,20 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
      }
  
      PendingIntent getGraphPendingIntent() {
@@ -540,6 +592,47 @@ index 4df6aa1..f2396a5 100644
      }
  
      synchronized void registerDeviceStateReceiver(DeviceStateReceiver newDeviceStateReceiver) {
+@@ -539,12 +531,19 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+         // Always show notification here to avoid problem with startForeground timeout
+         VpnStatus.logInfo(R.string.building_configration);
+ 
+-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.M  || (!foregroundNotificationVisible())) {
+-
+-            VpnStatus.updateStateString("VPN_GENERATE_CONFIG", "", R.string.building_configration, ConnectionStatus.LEVEL_START);
+-            showNotification(VpnStatus.getLastCleanLogMessage(this),
+-                    VpnStatus.getLastCleanLogMessage(this), NOTIFICATION_CHANNEL_NEWSTATUS_ID, 0, ConnectionStatus.LEVEL_START, null);
+-        }
++        /* MYSTERIUM: unconditional, as the comment above says it should be. The removed guard
++         * asked the NotificationManager for ALL of the app's notifications ("assume for simplicity
++         * that all our notifications are foreground"), which in a host app with push/local
++         * notifications is true most of the time. startForeground() then only happened later on
++         * mCommandHandler, and anything slow or throwing on the way there blew the
++         * startForegroundService() deadline, killing the process with
++         * ForegroundServiceDidNotStartInTimeException. Re-posting is cheap: same channel, same
++         * notification id, so it updates the existing notification. */
++        VpnStatus.updateStateString("VPN_GENERATE_CONFIG", "", R.string.building_configration, ConnectionStatus.LEVEL_START);
++        // Read after updateStateString: getLastCleanLogMessage() renders the state it just set.
++        String lastLogMessage = VpnStatus.getLastCleanLogMessage(this);
++        showNotification(lastLogMessage, lastLogMessage, NOTIFICATION_CHANNEL_NEWSTATUS_ID, 0,
++                ConnectionStatus.LEVEL_START, null);
+ 
+         /* start the OpenVPN process itself in a background thread */
+         mCommandHandler.post(() -> startOpenVPN(intent, startId));
+@@ -552,13 +551,7 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
+         return START_STICKY;
+     }
+ 
+-    @TargetApi(Build.VERSION_CODES.M)
+-    private boolean foregroundNotificationVisible() {
+-        NotificationManager mNotificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+-        StatusBarNotification[] notifications = mNotificationManager.getActiveNotifications();
+-        /* Assume for simplicity that all our notifications are foreground */
+-        return notifications.length > 0;
+-    }
++    // MYSTERIUM: foregroundNotificationVisible() deleted along with its only call site above.
+ 
+     @RequiresApi(Build.VERSION_CODES.N_MR1)
+     private void updateShortCutUsage(VpnProfile profile) {
 @@ -671,7 +664,11 @@ public class OpenVPNService extends VpnService implements StateListener, Callbac
          mProfile = vp;
          ProfileManager.setConnectedVpnProfile(this, vp);

@@ -8,7 +8,7 @@ an opaque third-party prebuilt. This file is the audit trail.
 - **File:** `android/localmaven/network/mysterium/openvpn/icsopenvpn/0.7.55-myst/icsopenvpn-0.7.55-myst.aar`
 - **Coordinate:** `network.mysterium.openvpn:icsopenvpn:0.7.55-myst`
 - **Size:** ~33 MB
-- **SHA-256:** `af7cdc5529ba248c9057abd2e8c7a87f28f1077f963bb9c9a9fff093d44f7580`
+- **SHA-256:** `3540c8579b0056baac517cb6c930d9d9fb19cbbdf6216e4353fce5513aee50f6`
 - **Gradle variant built:** `:main:assembleSkeletonOvpn23Release`
   - `skeleton` flavor = VPN core engine **without** the ics-openvpn UI.
   - `ovpn23` flavor = OpenVPN3 C++ engine + OpenSSL.
@@ -48,6 +48,31 @@ WireGuard notification (no functional/crypto change to the engine):
   process killed with `CannotPostForegroundServiceNotificationException`. Creating them in the
   service makes that impossible from any entry point. Channel names/descriptions still come from the
   upstream string resources, so they stay localized.
+- **`KeyChain` is never asked for a null alias.** `VpnProfile.getKeyStoreCertificates` now throws
+  `KeyChainException` when `mAlias` is null instead of calling `KeyChain.getPrivateKey(context, null)`,
+  which throws `NullPointerException: alias == null`. `mAuthenticationType` defaults to
+  `TYPE_KEYSTORE` and `ConfigParser` only moves it off that default when the config carries a
+  client-auth directive (`cert`, `pkcs12`, `secret`, `auth-user-pass`, …), so any config that has
+  none — blank, truncated, an error body, the wrong protocol — converts to a keystore profile that
+  can never have an alias (picking one is ics's UI, which this build strips). The NPE landed on the
+  service command thread (`startOpenVPN` → `getConfigFile` → `getExternalCertificates`) or on the
+  thread `checkForRestart` spawns when the system restarts the service with the last connected
+  profile; neither is caught, so it killed the whole host app process. `getExternalCertificates`
+  already catches `KeyChainException`, logs it and returns null.
+- **The foreground notification is always posted in `onStartCommand`.** Upstream guarded it with
+  `Build.VERSION.SDK_INT <= M || !foregroundNotificationVisible()`, and that helper asks the
+  `NotificationManager` for *all* of the app's active notifications ("assume for simplicity that all
+  our notifications are foreground"). In a host app with push/local notifications that is true most
+  of the time, so `startForeground()` was deferred to `mCommandHandler` and anything slow or throwing
+  on the way there missed the `startForegroundService()` deadline →
+  `ForegroundServiceDidNotStartInTimeException`. Re-posting is cheap: same channel, same notification
+  id, so it updates the notification already on screen. `foregroundNotificationVisible()` and its
+  `StatusBarNotification` import are deleted with it — the condition is retired, not replaced.
+- **`LaunchVPN.showLogWindow()` is a no-op.** It started
+  `<host app package>.activities.LogWindow`, which only resolves when ics-openvpn *is* the app; in a
+  host app the `ActivityNotFoundException` propagated out of `onCreate()`/`onActivityResult()` (and
+  had the host app defined that name, it would have opened an unrelated activity). The log window is
+  stripped from this build, so there is nothing to show.
 - **Security hardening:** removed permissions and exported components that the headless
   connect flow never uses and that are unsafe for a consumer VPN app:
   - permissions: `QUERY_ALL_PACKAGES` (Play-restricted), `READ_EXTERNAL_STORAGE`,

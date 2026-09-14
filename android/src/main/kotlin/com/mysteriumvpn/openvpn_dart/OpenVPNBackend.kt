@@ -77,14 +77,39 @@ object OpenVPNBackend : VpnStatus.StateListener, VpnStatus.ByteCountListener {
     }
 
     /**
+     * True when [profile] would make ics-openvpn pull a client certificate out of the Android
+     * keystore — which this build can never supply, since choosing one is ics's UI and that is
+     * stripped, so ics calls `KeyChain.getPrivateKey(context, null)` and NPEs the process dead.
+     * `mAuthenticationType` defaults to [VpnProfile.TYPE_KEYSTORE], so any config `ConfigParser`
+     * finds no client-auth directive in lands here.
+     *
+     * Mirrors the `no_keystore_cert_selected` branch of `VpnProfile.checkProfile`, which
+     * `VPNLaunchHelper.startOpenVpn` never runs — re-check it on every AAR bump. Calling
+     * `checkProfile` wholesale would risk rejecting server configs that connect fine today.
+     */
+    internal fun needsKeystoreCertificate(profile: VpnProfile): Boolean =
+        when (profile.mAuthenticationType) {
+            VpnProfile.TYPE_KEYSTORE,
+            VpnProfile.TYPE_USERPASS_KEYSTORE,
+            VpnProfile.TYPE_EXTERNAL_APP -> profile.mAlias == null
+            else -> false
+        }
+
+    /**
      * Parses [config] (a full .ovpn, credentials inline via `<auth-user-pass>`), registers the
      * profile, and starts the OpenVPN service. VPN consent MUST already be granted by the caller.
      * Returns after the service is asked to start; progress arrives via [statusFlow].
+     *
+     * @throws IllegalArgumentException if [config] parses into a profile that cannot connect.
      */
     fun connect(config: String) {
         val profile: VpnProfile = ConfigParser().run {
             parseConfig(StringReader(config))
             convertProfile()
+        }
+        require(!needsKeystoreCertificate(profile)) {
+            "OpenVPN config requires a client certificate from the Android keystore, which this " +
+                "client cannot supply. Expected an inline cert/key, a static key, or auth-user-pass."
         }
         profile.mName = PROFILE_NAME
         // Kill switch (in-tunnel leak prevention). Forced on regardless of what the config says:
