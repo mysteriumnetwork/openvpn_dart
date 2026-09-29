@@ -14,7 +14,10 @@ OpenVPN Dart SDK for iOS/macOS
   s.author = { "Mysterium Network" => "mysterium-dev@mysterium.network" }
 
   s.source = { :path => "." }
-  s.source_files = "Classes/**/*"
+  s.source_files = "openvpn_dart/Sources/openvpn_dart/**/*.swift"
+  s.resource_bundles = {
+    "openvpn_dart_privacy" => ["openvpn_dart/Sources/openvpn_dart/PrivacyInfo.xcprivacy"],
+  }
 
 #   s.platform = :ios, "15.0"
 
