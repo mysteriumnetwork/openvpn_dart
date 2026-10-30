@@ -25,7 +25,11 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (failWith == call.method) {
-        throw PlatformException(code: '-1', message: 'native said no');
+        throw PlatformException(
+          code: '-1',
+          message: 'native said no',
+          details: 'stale configuration',
+        );
       }
       switch (call.method) {
         case 'status':
@@ -122,10 +126,20 @@ void main() {
       expect(await openVpn.checkTunnelConfiguration(), isFalse);
     });
 
-    test('checkTunnelConfiguration surfaces a native failure', () async {
+    test('checkTunnelConfiguration preserves the native PlatformException', () async {
       failWith = 'checkTunnelConfiguration';
 
-      expect(openVpn.checkTunnelConfiguration(), throwsA(isA<Exception>()));
+      // isA<Exception>() would also pass for a rewrapped bare Exception, which
+      // is exactly the regression this guards: callers branch on the code.
+      await expectLater(
+        openVpn.checkTunnelConfiguration(),
+        throwsA(
+          isA<PlatformException>()
+              .having((e) => e.code, 'code', '-1')
+              .having((e) => e.message, 'message', 'native said no')
+              .having((e) => e.details, 'details', 'stale configuration'),
+        ),
+      );
     });
 
     test('setupTunnel and removeTunnelConfiguration delegate to the platform', () async {
