@@ -3,5 +3,8 @@
 .fvm/
 .dart_tool/
 
+# Created by pub and the test runner
+build/
+
 # Internal planning docs (specs/plans) — not for the public repo
 docs/superpowers/
