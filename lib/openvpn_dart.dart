@@ -178,13 +178,12 @@ class OpenVPNDart {
   /// iOS/macOS: whether a NetworkExtension tunnel configuration exists.
   /// Android: whether the user has already granted VPN consent
   /// (`VpnService.prepare` returns no prompt).
+  /// Throws a [PlatformException] when the configuration could not be read —
+  /// which is not the same as there being none, and callers act on the
+  /// difference.
   Future<bool> checkTunnelConfiguration() async {
-    try {
-      final result = await _channelControl.invokeMethod("checkTunnelConfiguration");
-      return result == true; // Ensure bool
-    } on PlatformException catch (e) {
-      throw Exception("checkTunnelConfiguration failed: ${e.message}");
-    }
+    final result = await _channelControl.invokeMethod("checkTunnelConfiguration");
+    return result == true; // Ensure bool
   }
 
   /// Remove the saved tunnel configuration.

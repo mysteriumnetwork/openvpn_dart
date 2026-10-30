@@ -73,13 +73,19 @@ public class OpenvpnDartPlugin: NSObject, FlutterPlugin {
                 }
 
             case "checkTunnelConfiguration":
-                OpenvpnDartPlugin.utils.checkTunnelConfiguration { manager in
-                    if let _ = manager {
-                        os_log("[PLUGIN] Tunnel is already configured")
-                        result(true)
-                    } else {
-                        os_log("[PLUGIN] Tunnel is not configured")
-                        result(false)
+                OpenvpnDartPlugin.utils.checkTunnelConfiguration { outcome in
+                    switch outcome {
+                    case .success(let manager):
+                        if manager != nil {
+                            os_log("[PLUGIN] Tunnel is already configured")
+                            result(true)
+                        } else {
+                            os_log("[PLUGIN] Tunnel is not configured")
+                            result(false)
+                        }
+                    case .failure(let error):
+                        os_log("[PLUGIN] checkTunnelConfiguration failed: %@", error.localizedDescription)
+                        result(FlutterError(code: "97", message: "Failed to check tunnel configuration", details: error.localizedDescription))
                     }
                 }
 
@@ -165,6 +171,17 @@ public class OpenvpnDartPlugin: NSObject, FlutterPlugin {
 }
 
 #if os(iOS) || os(macOS)
+enum VPNUtilsError: LocalizedError {
+    /// `initialize` has not run, so there is no provider bundle id to look up.
+    case notInitialized
+
+    var errorDescription: String? {
+        switch self {
+        case .notInitialized: return "VPN engine must be initialized"
+        }
+    }
+}
+
 class VPNUtils {
     var providerManager: NETunnelProviderManager?
     var providerBundleIdentifier: String?
@@ -200,31 +217,45 @@ class VPNUtils {
         }
     }
 
-    func checkTunnelConfiguration(result: @escaping (NETunnelProviderManager?) -> Void) {
+    /// Looks the tunnel configuration up, reporting *why* it could not be read
+    /// rather than folding every failure into "no configuration" — callers read
+    /// a missing configuration as "the user has not granted permission".
+    func checkTunnelConfiguration(result: @escaping (Result<NETunnelProviderManager?, Error>) -> Void) {
         guard let bundleId = providerBundleIdentifier else {
-            result(nil)
+            os_log("[VPNUTILS] checkTunnelConfiguration before initialize")
+            result(.failure(VPNUtilsError.notInitialized))
             return
         }
         Task {
             do {
                 let managers = try await NETunnelProviderManager.loadAllFromPreferences()
-                if let existingMgr = managers.first(where: {
+                let existingMgr = managers.first(where: {
                     ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == bundleId
-                }) {
+                })
+                if let existingMgr = existingMgr {
                     self.providerManager = existingMgr
-                    result(existingMgr)
-                } else {
-                    result(nil)
                 }
+                result(.success(existingMgr))
             } catch {
-                result(nil)
+                os_log("[VPNUTILS] loadAllFromPreferences failed: %@", error.localizedDescription)
+                result(.failure(error))
             }
         }
     }
 
     func setupTunnel(completion: @escaping (_ error: Error?) -> Void) {
         // Only create a new tunnel if none exists
-        checkTunnelConfiguration { existingManager in
+        checkTunnelConfiguration { outcome in
+            let existingManager: NETunnelProviderManager?
+            switch outcome {
+            case .success(let manager):
+                existingManager = manager
+            case .failure(let error):
+                // Don't create a second configuration because the lookup failed.
+                completion(error)
+                return
+            }
+
             if let manager = existingManager {
                 os_log("[VPNUTILS] Tunnel already configured, reusing existing")
                 self.providerManager = manager
