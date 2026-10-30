@@ -1,19 +1,6 @@
 group = "com.mysteriumvpn.openvpn_dart"
 version = "1.0-SNAPSHOT"
 
-buildscript {
-    ext.kotlin_version = "1.8.22"
-    repositories {
-        google()
-        mavenCentral()
-    }
-
-    dependencies {
-        classpath("com.android.tools.build:gradle:8.7.0")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
-    }
-}
-
 allprojects {
     repositories {
         google()
@@ -22,7 +9,6 @@ allprojects {
 }
 
 apply plugin: "com.android.library"
-apply plugin: "kotlin-android"
 
 android {
     namespace = "com.mysteriumvpn.openvpn_dart"
@@ -35,9 +21,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17
-    }
 
     sourceSets {
         main.java.srcDirs += "src/main/kotlin"
@@ -85,4 +68,14 @@ dependencies {
 
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.mockito:mockito-core:5.0.0")
+}
+
+project.tasks.configureEach { task ->
+    if (task.name.contains("compile") && task.name.contains("Kotlin")) {
+        try {
+            task.kotlinOptions.jvmTarget = "17"
+        } catch (Exception e) {
+            // Ignore
+        }
+    }
 }
