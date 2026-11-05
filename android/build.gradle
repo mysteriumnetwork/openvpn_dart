@@ -70,12 +70,8 @@ dependencies {
     testImplementation("org.mockito:mockito-core:5.0.0")
 }
 
-project.tasks.configureEach { task ->
-    if (task.name.contains("compile") && task.name.contains("Kotlin")) {
-        try {
-            task.kotlinOptions.jvmTarget = "17"
-        } catch (Exception e) {
-            // Ignore
-        }
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
