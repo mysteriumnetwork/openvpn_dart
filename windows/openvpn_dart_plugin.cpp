@@ -1078,23 +1078,23 @@ namespace openvpn_dart
       throw std::runtime_error("OpenVPN executable not found at: " + openvpn_executable_path_);
     }
 
-    // Ensure previous connection is fully stopped
-    if (is_connected_ || is_monitoring_)
+    // Ensure previous connection is fully stopped.
+    //
+    // Asked of what is actually left, not of the two flags alone. A monitor
+    // thread that ends on an exception clears both, and leaves a thread that
+    // has finished but is still joinable and an OpenVPN that may still be
+    // running. Going by the flags, neither was cleaned up, and starting the
+    // next monitor over the joinable one terminated the app.
+    if (is_connected_ || is_monitoring_ || process_handle_ != nullptr || monitor_thread_.joinable())
     {
       OutputDebugStringA("Stopping previous VPN connection before starting new one");
 
       try
       {
-        is_monitoring_ = false;
         is_connected_ = false;
 
         // Wait for monitoring thread to exit
-        if (monitor_thread_.joinable())
-        {
-          OutputDebugStringA("Waiting for monitor thread to join...");
-          monitor_thread_.join();
-          OutputDebugStringA("Monitor thread joined");
-        }
+        StopMonitorThread();
 
         // Now call StopVPN to clean up process
         StopVPN();
@@ -1384,11 +1384,26 @@ namespace openvpn_dart
       }
     }
 
-    // Start monitoring thread
-    if (!is_monitoring_)
+    // Start monitoring thread. Nothing of an earlier one is left by now -- see
+    // the top of this function -- but assigning over a thread that is still
+    // joinable terminates the app, so that is made sure of here and not
+    // assumed.
+    StopMonitorThread();
+    monitor_stop_.Clear();
+    is_monitoring_ = true;
+    monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
+  }
+
+  void OpenVpnDartPlugin::StopMonitorThread()
+  {
+    is_monitoring_ = false;
+    monitor_stop_.Request();
+
+    if (monitor_thread_.joinable())
     {
-      is_monitoring_ = true;
-      monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
+      OutputDebugStringA("Waiting for monitor thread to finish...");
+      monitor_thread_.join();
+      OutputDebugStringA("Monitor thread finished");
     }
   }
 
@@ -1419,9 +1434,6 @@ namespace openvpn_dart
           }
         }
       }
-
-      // Give the disconnecting status time to be processed
-      Sleep(100);
 
       // Terminate the process gracefully
       if (process_handle_ != nullptr)
@@ -1469,17 +1481,12 @@ namespace openvpn_dart
         pipe_read_ = nullptr;
       }
 
-      // Set flags to false to stop monitoring thread
+      // Stop the monitoring thread and wait for it to finish. This runs on the
+      // platform thread, which is why the monitor is woken and not waited out:
+      // the window is frozen for as long as this takes.
       is_connected_ = false;
-      is_monitoring_ = false;
+      StopMonitorThread();
 
-      // Wait for threads to finish
-      if (monitor_thread_.joinable())
-      {
-        OutputDebugStringA("Waiting for monitor thread to finish...");
-        monitor_thread_.join();
-        OutputDebugStringA("Monitor thread finished");
-      }
       if (log_thread_.joinable())
       {
         OutputDebugStringA("Waiting for log thread to finish...");
@@ -1537,7 +1544,7 @@ namespace openvpn_dart
       bool connection_established = false;
 
       // Give the "connecting" status time to be sent and processed
-      Sleep(100);
+      monitor_stop_.WaitFor(std::chrono::milliseconds(100));
 
       while (is_monitoring_ && is_connected_)
       {
@@ -1655,7 +1662,9 @@ namespace openvpn_dart
           }
         }
 
-        Sleep(1000); // Check every second
+        // Check every second, or stop at once when asked to. Whoever stops
+        // this thread is waiting for it on the platform thread.
+        monitor_stop_.WaitFor(std::chrono::milliseconds(1000));
       }
 
       OutputDebugStringA("MonitorVPNStatus thread exiting normally");

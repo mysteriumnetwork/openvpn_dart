@@ -20,6 +20,7 @@ set(PLUGIN_NAME "openvpn_dart_plugin")
 list(APPEND PLUGIN_SOURCES
   "openvpn_dart_plugin.cpp"
   "openvpn_dart_plugin.h"
+  "stop_signal.h"
 )
 
 # Define the plugin library target. Its name must not be changed (see comment
@@ -87,6 +88,7 @@ FetchContent_MakeAvailable(googletest)
 # directly into the test binary rather than using the DLL.
 add_executable(${TEST_RUNNER}
   test/openvpn_dart_plugin_test.cpp
+  test/stop_signal_test.cpp
   ${PLUGIN_SOURCES}
 )
 apply_standard_settings(${TEST_RUNNER})

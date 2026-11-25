@@ -12,6 +12,8 @@
 #include <atomic>
 #include <mutex>
 
+#include "stop_signal.h"
+
 namespace openvpn_dart
 {
 
@@ -38,6 +40,10 @@ namespace openvpn_dart
         void StartVPN(const std::string &config);
         void StopVPN();
         void MonitorVPNStatus();
+        // Stops the monitor thread and waits for it to end, without sitting
+        // out whatever is left of its wait between checks. Not for the monitor
+        // thread itself to call.
+        void StopMonitorThread();
         std::string GetCurrentStatus();
         bool IsVPNRunning();
 
@@ -87,6 +93,9 @@ namespace openvpn_dart
         std::atomic<bool> is_connected_;
         std::atomic<bool> is_monitoring_;
         std::thread monitor_thread_;
+        // What the monitor thread sleeps on between checks, so that stopping
+        // it does not have to wait for the sleep to end.
+        StopSignal monitor_stop_;
         std::thread log_thread_;
         std::string current_status_;
         std::mutex status_mutex_;

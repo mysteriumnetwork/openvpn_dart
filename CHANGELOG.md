@@ -21,6 +21,14 @@
   named `openvpn.exe` — OpenVPN GUI's or OpenVPN Connect's included — and a later disconnect
   terminated it. Only this plugin's own copy is considered now, by path, and only to end one that
   outlived the app that started it.
+- **Windows: disconnecting froze the window for up to a second.** The stop runs on the platform
+  thread, where it slept for 100 ms and then waited for the status monitor thread to finish its
+  one-second sleep. The sleep is gone and the monitor is woken at once, so a stop now takes as long
+  as `openvpn.exe` takes to exit. A reconnect, which stops the old tunnel first, gains the same.
+- **Windows: connecting after the status monitor had failed crashed the app.** A monitor thread
+  that ended on an exception stayed joinable, and the next `connect()` started a new one over it,
+  which terminates the process. The `openvpn.exe` it had been watching was left running too.
+  `connect()` now stops whatever is actually left of the previous connection first.
 - **Android: a `.ovpn` with no client-auth directive crashed the host app process on connect.**
   `connect()` now rejects such a config with `err_connect`, and the bundled AAR fails it as an
   ordinary keystore error instead of `NullPointerException: alias == null` — which also covers the
