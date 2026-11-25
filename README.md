@@ -476,6 +476,12 @@ Future<String> loadConfigFromAPI() async {
 **`disconnect()`**
 - Disconnects from VPN
 - Safe to call even if not connected
+- Returns a `Future<void>` that completes once the platform has handled the request. On Windows
+  that is after `openvpn.exe` has been terminated and has exited, or has been given five seconds
+  to, so **await it before quitting the app** (`exit(0)` from a tray menu, for instance) —
+  dropped, the app can exit before the request is ever handled
+- Throws if the platform reports a failure. Windows does not report one: a stop that fails there
+  is only logged
 
 **`isConnected()`**
 - Returns `Future<bool>` indicating connection status
@@ -555,6 +561,12 @@ Notes worth knowing:
 **Firewall:**
 - Users may see Windows Firewall prompt on first connection
 - Should be allowed for VPN to function
+
+**Lifetime:**
+- The tunnel lives and dies with the app. `openvpn.exe` runs in a kill-on-close job object, so it
+  ends when the app does however that happens — a quit, a crash, or being ended from Task Manager
+- A tunnel is never carried over to the next launch. An `openvpn.exe` of this plugin's that
+  outlived the app that started it is ended at startup, not re-attached to
 
 ### iOS/macOS
 

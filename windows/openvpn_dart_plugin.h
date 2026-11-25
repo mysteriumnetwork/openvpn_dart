@@ -12,6 +12,8 @@
 #include <atomic>
 #include <mutex>
 
+#include "stop_signal.h"
+
 namespace openvpn_dart
 {
 
@@ -38,9 +40,12 @@ namespace openvpn_dart
         void StartVPN(const std::string &config);
         void StopVPN();
         void MonitorVPNStatus();
+        // Stops the monitor thread and waits for it to end, without sitting
+        // out whatever is left of its wait between checks. Not for the monitor
+        // thread itself to call.
+        void StopMonitorThread();
         std::string GetCurrentStatus();
         bool IsVPNRunning();
-        void CheckExistingConnection();
 
         // TAP driver management
         bool IsTAPDriverInstalled();
@@ -74,6 +79,12 @@ namespace openvpn_dart
         std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
         std::mutex event_sink_mutex_;
 
+        // Ends OpenVPN if the app dies without stopping it -- quit with exit(),
+        // crashed, ended from Task Manager -- since the tunnel would otherwise
+        // outlive the app, with the machine still routed into it. Null when it
+        // could not be created, which StartVPN reports and survives.
+        HANDLE job_;
+
         // OpenVPN process handle
         PROCESS_INFORMATION process_info_;
         HANDLE process_handle_;
@@ -82,6 +93,9 @@ namespace openvpn_dart
         std::atomic<bool> is_connected_;
         std::atomic<bool> is_monitoring_;
         std::thread monitor_thread_;
+        // What the monitor thread sleeps on between checks, so that stopping
+        // it does not have to wait for the sleep to end.
+        StopSignal monitor_stop_;
         std::thread log_thread_;
         std::string current_status_;
         std::mutex status_mutex_;

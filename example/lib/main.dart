@@ -137,12 +137,17 @@ class _VpnHomePageState extends State<VpnHomePage> {
     }
   }
 
-  void _disconnect() {
-    // disconnect() is fire-and-forget (void); progress arrives via the status stream.
-    _vpn.disconnect();
+  Future<void> _disconnect() async {
+    try {
+      await _vpn.disconnect();
+    } catch (e) {
+      _snack("Failed to disconnect: $e", isError: true);
+    }
   }
 
   void _snack(String message, {bool isError = false}) {
+    // Called after awaits, by which time the page may be gone.
+    if (!mounted) return;
     final scheme = Theme.of(context).colorScheme;
     final fg = isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
     _messengerKey.currentState

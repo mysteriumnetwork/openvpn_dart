@@ -114,9 +114,23 @@ class OpenVPNDart {
     }
   }
 
-  ///Disconnect from VPN
-  void disconnect() {
-    _channelControl.invokeMethod("disconnect");
+  /// Disconnect from the VPN.
+  ///
+  /// Completes once the platform has handled the request. On Windows that is
+  /// after `openvpn.exe` has been terminated and has exited, or has been given
+  /// five seconds to, so a caller that quits the app straight afterwards must
+  /// await this: dropped, the app can exit before the request is ever handled.
+  /// On Android, iOS and macOS the teardown has only been requested by then,
+  /// and its progress arrives via [statusStream].
+  ///
+  /// Throws if the platform reports a failure. Windows does not report one: a
+  /// stop that fails there is only logged.
+  Future<void> disconnect() async {
+    try {
+      await _channelControl.invokeMethod("disconnect");
+    } on PlatformException catch (e) {
+      throw Exception("disconnect failed: ${e.message}");
+    }
   }
 
   ///Check if connected to vpn
