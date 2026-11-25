@@ -1,27 +1,30 @@
-import Flutter
-import UIKit
+import NetworkExtension
 import XCTest
 
 
 @testable import openvpn_dart
 
-// This demonstrates a simple unit test of the Swift portion of this plugin's implementation.
+// Unit tests of the Swift portion of this plugin's implementation.
 //
 // See https://developer.apple.com/documentation/xctest for more information about using XCTest.
 
 class RunnerTests: XCTestCase {
 
-  func testGetPlatformVersion() {
-    let plugin = OpenvpnDartPlugin()
+  // A tunnel that is re-establishing its link has not ended, and must not be
+  // reported as though it had: it comes back by itself.
+  func testReconnectingTunnelIsReportedAsConnecting() {
+    XCTAssertEqual(statusName(for: .reasserting), "connecting")
+  }
 
-    let call = FlutterMethodCall(methodName: "getPlatformVersion", arguments: [])
+  func testMissingConfigurationIsReportedAsDisconnected() {
+    XCTAssertEqual(statusName(for: .invalid), "disconnected")
+  }
 
-    let resultExpectation = expectation(description: "result block must be called.")
-    plugin.handle(call) { result in
-      XCTAssertEqual(result as! String, "iOS " + UIDevice.current.systemVersion)
-      resultExpectation.fulfill()
-    }
-    waitForExpectations(timeout: 1)
+  func testEveryOtherStatusKeepsItsOwnName() {
+    XCTAssertEqual(statusName(for: .connecting), "connecting")
+    XCTAssertEqual(statusName(for: .connected), "connected")
+    XCTAssertEqual(statusName(for: .disconnecting), "disconnecting")
+    XCTAssertEqual(statusName(for: .disconnected), "disconnected")
   }
 
 }
