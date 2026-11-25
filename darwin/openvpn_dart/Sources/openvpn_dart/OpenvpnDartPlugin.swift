@@ -204,17 +204,7 @@ class VPNUtils {
 
     func currentStatus() -> String {
         guard let manager = providerManager else { return "disconnected" }
-        return stringFromStatus(manager.connection.status)
-    }
-
-    private func stringFromStatus(_ status: NEVPNStatus) -> String {
-        switch status {
-        case .connected: return "connected"
-        case .connecting: return "connecting"
-        case .disconnected: return "disconnected"
-        case .disconnecting: return "disconnecting"
-        @unknown default: return "unknown"
-        }
+        return statusName(for: manager.connection.status)
     }
 
     /// Looks the tunnel configuration up, reporting *why* it could not be read
@@ -421,8 +411,8 @@ class VPNUtils {
             queue: nil
         ) { [weak self] _ in
             guard let self = self else { return }
-            self.status?(self.stringFromStatus(self.providerManager?.connection.status ?? .invalid))
-            os_log("[VPNUTILS] VPN status changed: %@", self.stringFromStatus(self.providerManager?.connection.status ?? .invalid))
+            self.status?(statusName(for: self.providerManager?.connection.status ?? .invalid))
+            os_log("[VPNUTILS] VPN status changed: %@", statusName(for: self.providerManager?.connection.status ?? .invalid))
         }
     }
 

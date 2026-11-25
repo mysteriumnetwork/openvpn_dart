@@ -510,7 +510,9 @@ Future<String> loadConfigFromAPI() async {
 ### ConnectionStatus
 
 Enum values (see [lib/vpn_status.dart](lib/vpn_status.dart)):
-- `ConnectionStatus.connecting` - Connection in progress
+- `ConnectionStatus.connecting` - Connection in progress. On Android, iOS and macOS also a tunnel
+  that lost its network and is re-establishing itself: it has not ended, and returns to `connected`
+  by itself
 - `ConnectionStatus.connected` - Successfully connected
 - `ConnectionStatus.disconnecting` - Disconnection in progress
 - `ConnectionStatus.disconnected` - Not connected
@@ -577,6 +579,14 @@ Notes worth knowing:
 - For `tunnelStatistics()`: the packet-tunnel extension must answer the `OPENVPN_STATS` app message
   with `{"totalDownload":N,"totalUpload":N,"latestHandshake":0}` — copy the example extensions
   (`example/ios/VPNExtension`, `example/macos/VPNMExtension`)
+
+**Reconnects:**
+- While OpenVPN reconnects — after airplane mode or a change of network, say — the status is
+  `connecting`, and it returns to `connected` by itself. This relies on the packet-tunnel extension
+  setting `reasserting` while it reconnects, as the example extensions do
+- Set `tunPersist = true` on the extension's `OpenVPNConfiguration`, as the example extensions do.
+  Without it the tunnel's routes and DNS are removed for the length of every reconnect, and traffic
+  goes out over the normal network until the tunnel is back
 
 ### Android
 

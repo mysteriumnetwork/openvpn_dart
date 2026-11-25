@@ -29,6 +29,14 @@
   that ended on an exception stayed joinable, and the next `connect()` started a new one over it,
   which terminates the process. The `openvpn.exe` it had been watching was left running too.
   `connect()` now stops whatever is actually left of the previous connection first.
+- **iOS/macOS: a tunnel that was reconnecting was reported as `unknown`.** Losing the network —
+  airplane mode, say — puts the tunnel in the system's reasserting state, which had no status of
+  its own here. Host apps tend to show `unknown` as disconnected, though the tunnel had not ended
+  and came back by itself. It is `connecting` now, as on Android. A VPN configuration that is
+  missing is `disconnected`, not `unknown`.
+- **iOS/macOS example extensions: traffic left the tunnel during a reconnect.** They set
+  `tunPersist = false`, which removes the tunnel's routes and DNS for the length of every
+  reconnect. They set `true` now. An extension copied from them needs the same one-line change.
 - **Android: a `.ovpn` with no client-auth directive crashed the host app process on connect.**
   `connect()` now rejects such a config with `err_connect`, and the bundled AAR fails it as an
   ordinary keystore error instead of `NullPointerException: alias == null` — which also covers the
