@@ -17,6 +17,147 @@
 namespace openvpn_dart
 {
 
+  namespace
+  {
+
+    // How long an OpenVPN left by an earlier run is given to go once it has
+    // been terminated. Until it is gone it still holds the adapter, and a
+    // connect that got there first would fail to open it.
+    constexpr DWORD kOrphanExitWaitMs = 5000;
+
+    // The longest path Windows accepts, in characters.
+    constexpr size_t kMaxPathChars = 32768;
+
+    // Null if the job cannot be made to kill on close, since a job without
+    // that limit is no use here.
+    HANDLE CreateKillOnCloseJob()
+    {
+      // Unnamed and with default security, so not inheritable. OpenVPN is
+      // started inheriting handles, and a copy of this one in the child would
+      // keep the job open after the app had gone, with nothing left to close
+      // it.
+      HANDLE job = CreateJobObjectW(nullptr, nullptr);
+      if (job == nullptr)
+      {
+        return nullptr;
+      }
+
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+      limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
+      {
+        CloseHandle(job);
+        return nullptr;
+      }
+      return job;
+    }
+
+    // Whether |process| is running the executable at |path|.
+    bool RunsExecutable(HANDLE process, const std::filesystem::path &path)
+    {
+      std::wstring image(kMaxPathChars, L'\0');
+      DWORD length = static_cast<DWORD>(image.size());
+      if (!QueryFullProcessImageNameW(process, 0, image.data(), &length))
+      {
+        return false;
+      }
+      image.resize(length);
+
+      // By file identity rather than by spelling, which differs in case, in
+      // short 8.3 names and in how the folder was reached.
+      std::error_code error;
+      return std::filesystem::equivalent(std::filesystem::path(image), path, error);
+    }
+
+    // Whether the process that started |child| is still running.
+    //
+    // A process id is reused once its process has gone, so finding one in use
+    // settles nothing by itself: whoever has it now must also be older than
+    // the child to be the process that started it.
+    bool IsCreatorAlive(DWORD creator_pid, HANDLE child)
+    {
+      HANDLE creator = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, creator_pid);
+      if (creator == nullptr)
+      {
+        // No such process is the one answer that means gone. Anything else --
+        // access denied, say -- is a process that cannot be identified, and it
+        // is taken for the creator: leaving a stray OpenVPN behind costs less
+        // than ending a tunnel that is in use.
+        return GetLastError() != ERROR_INVALID_PARAMETER;
+      }
+
+      bool alive = WaitForSingleObject(creator, 0) == WAIT_TIMEOUT;
+      if (alive)
+      {
+        FILETIME creator_start = {};
+        FILETIME child_start = {};
+        FILETIME exit_time = {};
+        FILETIME kernel_time = {};
+        FILETIME user_time = {};
+        if (GetProcessTimes(creator, &creator_start, &exit_time, &kernel_time, &user_time) &&
+            GetProcessTimes(child, &child_start, &exit_time, &kernel_time, &user_time))
+        {
+          alive = CompareFileTime(&creator_start, &child_start) <= 0;
+        }
+      }
+      CloseHandle(creator);
+      return alive;
+    }
+
+    // Ends every OpenVPN of ours that outlived the app that started it.
+    //
+    // "Ours" is the copy this plugin extracted, told by its path. Being named
+    // openvpn.exe is not enough: OpenVPN GUI and OpenVPN Connect run one by
+    // that name too, and theirs is not ours to end.
+    //
+    // And it has to have outlived its creator. A second instance of the app,
+    // or a second engine in this one, constructs this plugin as well, and must
+    // not end the tunnel the first is using.
+    void TerminateOrphanedOpenVPN(const std::string &executable_path)
+    {
+      const std::filesystem::path own_executable(executable_path);
+
+      HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+      if (snapshot == INVALID_HANDLE_VALUE)
+      {
+        return;
+      }
+
+      PROCESSENTRY32W entry = {};
+      entry.dwSize = sizeof(entry);
+      for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry))
+      {
+        // Only to avoid opening every process on the machine. The path below
+        // is what decides.
+        if (lstrcmpiW(entry.szExeFile, L"openvpn.exe") != 0)
+        {
+          continue;
+        }
+
+        HANDLE process = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE,
+            FALSE, entry.th32ProcessID);
+        if (process == nullptr)
+        {
+          continue;
+        }
+
+        if (RunsExecutable(process, own_executable) &&
+            !IsCreatorAlive(entry.th32ParentProcessID, process))
+        {
+          OutputDebugStringA(("Ending an OpenVPN process left by an earlier run, PID " +
+                              std::to_string(entry.th32ProcessID))
+                                 .c_str());
+          TerminateProcess(process, 0);
+          WaitForSingleObject(process, kOrphanExitWaitMs);
+        }
+        CloseHandle(process);
+      }
+      CloseHandle(snapshot);
+    }
+
+  } // namespace
+
   // Static method registration
   void OpenVpnDartPlugin::RegisterWithRegistrar(
       flutter::PluginRegistrarWindows *registrar)
@@ -61,6 +202,7 @@ namespace openvpn_dart
 
   OpenVpnDartPlugin::OpenVpnDartPlugin(flutter::PluginRegistrarWindows *registrar)
       : registrar_(registrar),
+        job_(nullptr),
         process_handle_(nullptr),
         pipe_read_(nullptr),
         pipe_write_(nullptr),
@@ -82,8 +224,14 @@ namespace openvpn_dart
       ExtractBundledOpenVPN();
     }
 
-    // Check for existing OpenVPN connection
-    CheckExistingConnection();
+    // A tunnel is never carried from one run of the app to the next. Whatever
+    // OpenVPN of ours is still running was left by a run that ended without
+    // stopping it, and is holding the machine in a tunnel that nothing shows
+    // or controls. With the job below that takes a build from before there was
+    // one, or a start that could not be put in it.
+    TerminateOrphanedOpenVPN(openvpn_executable_path_);
+
+    job_ = CreateKillOnCloseJob();
   }
 
   OpenVpnDartPlugin::~OpenVpnDartPlugin()
@@ -128,6 +276,14 @@ namespace openvpn_dart
       {
         CloseHandle(pipe_write_);
         pipe_write_ = nullptr;
+      }
+
+      // Last, once OpenVPN has been stopped the ordinary way: closing the job
+      // ends whatever is still in it.
+      if (job_)
+      {
+        CloseHandle(job_);
+        job_ = nullptr;
       }
 
       OutputDebugStringA("OpenVpnDartPlugin cleanup completed");
@@ -819,6 +975,13 @@ namespace openvpn_dart
     }
     else if (method == "disconnect")
     {
+      // Answered only once StopVPN has returned: OpenVPN has been terminated
+      // and has exited, or has been given its five seconds to. A caller that
+      // awaits this and then quits the app is relying on exactly that, so the
+      // reply must not be moved ahead of the teardown.
+      //
+      // StopVPN catches whatever goes wrong inside it, so this never answers
+      // with an error: a stop that fails is only logged.
       try
       {
         StopVPN();
@@ -1074,7 +1237,9 @@ namespace openvpn_dart
         nullptr,
         nullptr,
         TRUE, // Inherit handles
-        CREATE_NO_WINDOW,
+        // Suspended so that it is in the job before it runs: it cannot then
+        // exit, or start a child, outside it.
+        CREATE_NO_WINDOW | CREATE_SUSPENDED,
         nullptr,
         nullptr,
         &si,
@@ -1122,6 +1287,23 @@ namespace openvpn_dart
       pipe_write_ = nullptr;
       throw std::runtime_error(error_msg);
     }
+
+    // Tied to the app from here on. Windows closes the job handle when the app
+    // dies, however it dies, and closing it ends everything in the job.
+    if (job_ == nullptr)
+    {
+      // Not fatal, and no worse than before there was a job: the tunnel still
+      // stops on disconnect and when the plugin is destroyed. What is lost is
+      // the backstop for an app that dies without doing either.
+      OutputDebugStringA("No kill-on-close job: OpenVPN will outlive an app that dies without stopping it");
+    }
+    else if (!AssignProcessToJobObject(job_, process_info_.hProcess))
+    {
+      OutputDebugStringA(("OpenVPN could not be put in the kill-on-close job. Error: " +
+                          std::to_string(GetLastError()))
+                             .c_str());
+    }
+    ResumeThread(process_info_.hThread);
 
     OutputDebugStringA("OpenVPN process created successfully");
     process_handle_ = process_info_.hProcess;
@@ -1526,118 +1708,6 @@ namespace openvpn_dart
   bool OpenVpnDartPlugin::IsVPNRunning()
   {
     return is_connected_ && process_handle_ != nullptr;
-  }
-
-  void OpenVpnDartPlugin::CheckExistingConnection()
-  {
-    OutputDebugStringA("Checking for existing OpenVPN connection...");
-
-    // Set up log and status file paths — same directory StartVPN writes them to,
-    // so tunnelStatistics keeps working after attaching to an existing process.
-    log_file_path_ = bundled_path_ + "\\config\\openvpn.log";
-    status_file_path_ = bundled_path_ + "\\config\\openvpn-status.log";
-
-    // Check if log file exists and has recent "Initialization Sequence Completed" message
-    if (std::filesystem::exists(log_file_path_))
-    {
-      try
-      {
-        std::ifstream log_file(log_file_path_);
-        if (log_file.is_open())
-        {
-          std::string line;
-          bool found_connected = false;
-          bool found_exit = false;
-
-          while (std::getline(log_file, line))
-          {
-            if (line.find("Initialization Sequence Completed") != std::string::npos)
-            {
-              found_connected = true;
-            }
-            else if (line.find("process exiting") != std::string::npos ||
-                     line.find("SIGTERM") != std::string::npos)
-            {
-              found_exit = true;
-            }
-          }
-          log_file.close();
-
-          // If we found connection but no exit, check if process is still running
-          if (found_connected && !found_exit)
-          {
-            // Try to find the OpenVPN process by name
-            HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if (snapshot != INVALID_HANDLE_VALUE)
-            {
-              PROCESSENTRY32 pe32;
-              pe32.dwSize = sizeof(PROCESSENTRY32);
-
-              if (Process32First(snapshot, &pe32))
-              {
-                do
-                {
-                  // Convert wide string to narrow string
-                  char processName[MAX_PATH];
-                  WideCharToMultiByte(CP_ACP, 0, pe32.szExeFile, -1, processName, MAX_PATH, NULL, NULL);
-
-                  if (strcmp(processName, "openvpn.exe") == 0)
-                  {
-                    // Found OpenVPN process - check if it's ours by command line
-                    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pe32.th32ProcessID);
-                    if (hProcess != nullptr)
-                    {
-                      OutputDebugStringA(("Found existing OpenVPN process with PID " + std::to_string(pe32.th32ProcessID)).c_str());
-
-                      // Set up our state to monitor this process
-                      process_handle_ = hProcess;
-                      ZeroMemory(&process_info_, sizeof(process_info_));
-                      process_info_.hProcess = hProcess;
-                      process_info_.hThread = nullptr; // We don't have the thread handle for existing process
-                      process_info_.dwProcessId = pe32.th32ProcessID;
-                      is_connected_ = true;
-
-                      {
-                        std::lock_guard<std::mutex> lock(status_mutex_);
-                        current_status_ = "connected";
-                      }
-
-                      // Start monitoring thread
-                      if (!is_monitoring_)
-                      {
-                        is_monitoring_ = true;
-                        monitor_thread_ = std::thread(&OpenVpnDartPlugin::MonitorVPNStatus, this);
-                      }
-
-                      OutputDebugStringA("Attached to existing OpenVPN connection");
-                      break;
-                    }
-                  }
-                } while (Process32Next(snapshot, &pe32));
-              }
-              CloseHandle(snapshot);
-            }
-          }
-        }
-      }
-      catch (const std::exception &e)
-      {
-        OutputDebugStringA(("Error checking existing connection: " + std::string(e.what())).c_str());
-      }
-      catch (...)
-      {
-        OutputDebugStringA("Unknown error checking existing connection");
-      }
-    }
-
-    if (!is_connected_)
-    {
-      OutputDebugStringA("No existing OpenVPN connection found");
-    }
-    else
-    {
-      OutputDebugStringA("Successfully attached to existing connection");
-    }
   }
 
   std::unique_ptr<flutter::StreamHandlerError<flutter::EncodableValue>>

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openvpn_dart/openvpn_dart.dart';
@@ -158,10 +160,38 @@ void main() {
 
   group('disconnect', () {
     test('asks the platform to stop the tunnel', () async {
-      openVpn.disconnect();
-      await Future<void>.delayed(Duration.zero);
+      await openVpn.disconnect();
 
       expect(calls.map((c) => c.method), contains('disconnect'));
+    });
+
+    test('completes only once the platform has replied', () async {
+      // A caller that quits right after disconnecting -- exit(0) from a tray
+      // menu -- has nothing else to wait on. A future that completed early
+      // let the process end with the native teardown still queued, leaving
+      // the tunnel up behind it.
+      final reply = Completer<void>();
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'disconnect') {
+          await reply.future;
+        }
+        return null;
+      });
+
+      var completed = false;
+      final pending = openVpn.disconnect().then((_) => completed = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(completed, isFalse);
+
+      reply.complete();
+      await pending;
+      expect(completed, isTrue);
+    });
+
+    test('surfaces a native failure', () async {
+      failWith = 'disconnect';
+
+      expect(openVpn.disconnect(), throwsA(isA<Exception>()));
     });
   });
 

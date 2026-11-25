@@ -40,7 +40,6 @@ namespace openvpn_dart
         void MonitorVPNStatus();
         std::string GetCurrentStatus();
         bool IsVPNRunning();
-        void CheckExistingConnection();
 
         // TAP driver management
         bool IsTAPDriverInstalled();
@@ -73,6 +72,12 @@ namespace openvpn_dart
         // Event sink for status updates
         std::unique_ptr<flutter::EventSink<flutter::EncodableValue>> event_sink_;
         std::mutex event_sink_mutex_;
+
+        // Ends OpenVPN if the app dies without stopping it -- quit with exit(),
+        // crashed, ended from Task Manager -- since the tunnel would otherwise
+        // outlive the app, with the machine still routed into it. Null when it
+        // could not be created, which StartVPN reports and survives.
+        HANDLE job_;
 
         // OpenVPN process handle
         PROCESS_INFORMATION process_info_;
